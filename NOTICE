@@ -1,0 +1,40 @@
+blight
+======
+
+Copyright (c) 2026 Bugsy Hewitt
+Licensed under the MIT License (see LICENSE).
+
+This product includes work inspired by and built on top of the following
+third-party projects. blight does not bundle their source; it is influenced by
+their design and drives one of them as an external dependency.
+
+--------------------------------------------------------------------------------
+cwe_checker (fkie-cad)
+--------------------------------------------------------------------------------
+Design inspiration. cwe_checker (https://github.com/fkie-cad/cwe_checker) is a
+static analysis tool that detects CWE patterns in binaries. blight reimagines
+the same goal — flagging well-defined CWE classes in ELF binaries — as a
+Python-native tool that requires neither Ghidra, Java, Docker, nor a Rust
+toolchain. The set of CWE classes detected and the per-binary findings model
+are inspired by cwe_checker's approach.
+
+cwe_checker is licensed under the LGPL-3.0. blight contains none of its source
+code; the attribution here is for design inspiration only.
+
+--------------------------------------------------------------------------------
+radare2
+--------------------------------------------------------------------------------
+Underlying analysis engine. blight drives radare2
+(https://github.com/radareorg/radare2) via the r2pipe interface to perform
+disassembly, control-flow analysis, and cross-reference resolution. radare2 is
+an external system dependency that the user must install separately; it is not
+bundled with blight.
+
+radare2 is licensed under the LGPL-3.0.
+
+--------------------------------------------------------------------------------
+r2pipe
+--------------------------------------------------------------------------------
+The Python binding used to communicate with radare2
+(https://github.com/radareorg/radare2-r2pipe). Declared as a Python dependency.
+r2pipe is licensed under the LGPL-3.0 / MIT (per its distribution).
