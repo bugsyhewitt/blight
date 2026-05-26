@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blight"
+version = "0.1.0"
+description = "Python-native CWE pattern detector for ELF binaries, driving radare2 via r2pipe — no Ghidra, no Java, no Docker, no Rust toolchain."
+readme = "README.md"
+requires-python = ">=3.13"
+license = { file = "LICENSE" }
+authors = [{ name = "Bugsy Hewitt" }]
+keywords = ["security", "static-analysis", "cwe", "radare2", "elf", "reverse-engineering"]
+classifiers = [
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security",
+    "Operating System :: POSIX :: Linux",
+]
+dependencies = [
+    "r2pipe>=1.8.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[project.scripts]
+blight = "blight.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/bugsyhewitt/blight"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: tests that shell out to a real radare2 install (deselect with -m 'not integration')",
+]
+testpaths = ["tests"]

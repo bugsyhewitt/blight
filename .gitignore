@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+
+# Note: the compiled ELF fixtures in tests/fixtures/ are intentionally
+# committed (they are pre-built blobs the suite needs). They have no file
+# extension, so the rules above do not match them.
