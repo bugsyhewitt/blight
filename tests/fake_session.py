@@ -133,3 +133,110 @@ def clean_baseline_session() -> FakeR2Session:
         Import(name="strcspn", plt=0x401070),
     ]
     return FakeR2Session(imports, xrefs={})
+
+
+# --- CWE-134 format-string fixtures ----------------------------------------
+
+def printf_fmtstr_vuln_session() -> FakeR2Session:
+    """printf with a non-constant format string (rdi loaded from a stack buffer).
+
+    Scenario: a function reads a line from the user into a buffer and passes it
+    directly to printf — classic format string vulnerability.
+    """
+    imports = [
+        Import(name="printf", plt=0x401030),
+        Import(name="fgets", plt=0x401040),
+    ]
+    xrefs = {
+        0x401030: [Xref(0x401185, "CALL", "log_msg", "call sym.imp.printf")],
+    }
+    # log_msg builds a message in a stack buffer and passes it to printf.
+    # rdi is loaded via `lea rdi, [rbp - 0x80]` (stack address, not a str.*)
+    log_msg_ops = [
+        Instruction(0x401166, "push rbp"),
+        Instruction(0x401170, "lea rax, [rbp - 0x80]"),
+        Instruction(0x401178, "mov rdi, rax"),       # loads stack addr into rdi
+        Instruction(0x401185, "call sym.imp.printf"),
+        Instruction(0x40118a, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401166: log_msg_ops})
+
+
+def printf_constant_session() -> FakeR2Session:
+    """printf("Hello %s\\n", name) — constant format string, must NOT be flagged."""
+    imports = [Import(name="printf", plt=0x401030)]
+    xrefs = {0x401030: [Xref(0x401150, "CALL", "main", "call sym.imp.printf")]}
+    main_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "lea rsi, [rbp - 0x10]"),    # second arg: name
+        Instruction(0x401148, "lea rdi, str.Hello__s_n"),   # format literal
+        Instruction(0x401150, "call sym.imp.printf"),
+        Instruction(0x401155, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: main_ops})
+
+
+def fprintf_fmtstr_vuln_session() -> FakeR2Session:
+    """fprintf with a non-constant format string (rsi loaded from stack)."""
+    imports = [
+        Import(name="fprintf", plt=0x401030),
+    ]
+    xrefs = {
+        0x401030: [Xref(0x4011a0, "CALL", "write_log", "call sym.imp.fprintf")],
+    }
+    # rsi (format arg for fprintf) is loaded from a stack buffer.
+    write_log_ops = [
+        Instruction(0x401180, "push rbp"),
+        Instruction(0x401190, "lea rax, [rbp - 0x100]"),
+        Instruction(0x401198, "mov rsi, rax"),          # non-constant into rsi
+        Instruction(0x4011a0, "call sym.imp.fprintf"),
+        Instruction(0x4011a5, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401180: write_log_ops})
+
+
+def snprintf_fmtstr_vuln_session() -> FakeR2Session:
+    """snprintf with a non-constant format string (rdx loaded from stack)."""
+    imports = [
+        Import(name="snprintf", plt=0x401030),
+    ]
+    xrefs = {
+        0x401030: [Xref(0x4011c0, "CALL", "build_msg", "call sym.imp.snprintf")],
+    }
+    # rdx (format arg for snprintf) is loaded from a stack buffer.
+    build_msg_ops = [
+        Instruction(0x401190, "push rbp"),
+        Instruction(0x4011a0, "lea rax, [rbp - 0x80]"),
+        Instruction(0x4011b0, "mov rdx, rax"),          # non-constant into rdx
+        Instruction(0x4011c0, "call sym.imp.snprintf"),
+        Instruction(0x4011c5, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401190: build_msg_ops})
+
+
+def syslog_fmtstr_vuln_session() -> FakeR2Session:
+    """syslog with a non-constant format string (rsi loaded from stack)."""
+    imports = [
+        Import(name="syslog", plt=0x401030),
+    ]
+    xrefs = {
+        0x401030: [Xref(0x4011b0, "CALL", "audit_event", "call sym.imp.syslog")],
+    }
+    # rsi (format arg for syslog) is a stack buffer.
+    audit_ops = [
+        Instruction(0x401190, "push rbp"),
+        Instruction(0x4011a0, "lea rax, [rbp - 0x200]"),
+        Instruction(0x4011a8, "mov rsi, rax"),          # non-constant into rsi
+        Instruction(0x4011b0, "call sym.imp.syslog"),
+        Instruction(0x4011b5, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401190: audit_ops})
+
+
+def printf_no_dangerous_imports_session() -> FakeR2Session:
+    """A session with no printf-family imports — nothing should be flagged."""
+    imports = [
+        Import(name="puts", plt=0x401030),
+        Import(name="fgets", plt=0x401040),
+    ]
+    return FakeR2Session(imports, xrefs={})

@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from blight.detectors import cwe78, cwe120, cwe242
+from blight.detectors import cwe78, cwe120, cwe134, cwe242
 from tests.fake_session import (
     clean_baseline_session,
+    fprintf_fmtstr_vuln_session,
     gets_vuln_session,
+    printf_constant_session,
+    printf_fmtstr_vuln_session,
+    printf_no_dangerous_imports_session,
+    snprintf_fmtstr_vuln_session,
     strcpy_vuln_session,
+    syslog_fmtstr_vuln_session,
     system_constant_session,
     system_vuln_session,
 )
@@ -53,6 +59,64 @@ class TestCwe242:
         # strcpy-vuln does have gets, so it should appear for 242 too.
         findings = cwe242.detect(strcpy_vuln_session())
         assert [f.symbol for f in findings] == ["gets"]
+
+
+class TestCwe134:
+    def test_flags_printf_with_nonconstant_format(self) -> None:
+        findings = cwe134.detect(printf_fmtstr_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 134
+        assert f.symbol == "printf"
+        assert f.function == "log_msg"
+        assert f.address == hex(0x401185)
+        assert "non-constant" in f.evidence
+
+    def test_does_not_flag_printf_with_constant_format(self) -> None:
+        assert cwe134.detect(printf_constant_session()) == []
+
+    def test_flags_fprintf_with_nonconstant_format(self) -> None:
+        findings = cwe134.detect(fprintf_fmtstr_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 134
+        assert f.symbol == "fprintf"
+        assert f.function == "write_log"
+        assert f.address == hex(0x4011A0)
+        assert "non-constant" in f.evidence
+
+    def test_flags_snprintf_with_nonconstant_format(self) -> None:
+        findings = cwe134.detect(snprintf_fmtstr_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 134
+        assert f.symbol == "snprintf"
+        assert f.function == "build_msg"
+        assert "non-constant" in f.evidence
+
+    def test_flags_syslog_with_nonconstant_format(self) -> None:
+        findings = cwe134.detect(syslog_fmtstr_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 134
+        assert f.symbol == "syslog"
+        assert f.function == "audit_event"
+        assert "non-constant" in f.evidence
+
+    def test_clean_baseline_no_findings(self) -> None:
+        # clean-baseline has snprintf but no xrefs to it — no findings.
+        assert cwe134.detect(clean_baseline_session()) == []
+
+    def test_no_dangerous_imports_no_findings(self) -> None:
+        assert cwe134.detect(printf_no_dangerous_imports_session()) == []
+
+    def test_finding_has_correct_cwe_id(self) -> None:
+        findings = cwe134.detect(printf_fmtstr_vuln_session())
+        assert all(f.cwe == 134 for f in findings)
+
+    def test_evidence_mentions_symbol(self) -> None:
+        findings = cwe134.detect(printf_fmtstr_vuln_session())
+        assert all("printf" in f.evidence for f in findings)
 
 
 class TestCwe78:
