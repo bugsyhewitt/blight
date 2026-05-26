@@ -11,4 +11,7 @@ __version__ = "0.1.0"
 
 from blight.findings import Finding
 
+# pipeline_adapter is kept separate to avoid importing r2pipe at the top level.
+# Explicit import: from blight.pipeline_adapter import analyze_binary
+
 __all__ = ["Finding", "__version__"]
