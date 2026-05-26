@@ -156,6 +156,8 @@ Not in scope for v0.1 (deferred): Ghidra integration, PE binaries, non-x86_64
 architectures (ARM/MIPS/PPC), additional CWE classes, symbolic execution /
 taint analysis, firmware analysis.
 
+See [POST_V01.md](POST_V01.md) for the ranked backlog of post-v0.1 directions.
+
 ## Ethical use
 
 `blight` is a defensive static-analysis tool for auditing software you own or
