@@ -11,8 +11,10 @@ import json
 import sys
 from pathlib import Path
 
+import blight
 from blight.detectors import DETECTORS
 from blight.engine import run_checks
+from blight.formatters.sarif import dump_sarif
 
 _ALL_CHECKS = sorted(DETECTORS)
 # Accepted --checks tokens: each cwe id as a string, plus "all".
@@ -42,7 +44,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--format",
         default="json",
-        choices=["json"],
+        choices=["json", "sarif"],
         help="output format (default: json)",
     )
     return parser
@@ -71,13 +73,17 @@ def main(argv: list[str] | None = None) -> int:
     with Radare2Session(str(binary_path)) as session:
         findings = run_checks(session, checks)
 
-    output = {
-        "binary": str(binary_path),
-        "checks": checks,
-        "findings": [f.to_dict() for f in findings],
-    }
-    json.dump(output, sys.stdout, indent=2)
-    sys.stdout.write("\n")
+    if args.format == "sarif":
+        sys.stdout.write(dump_sarif(str(binary_path), findings, version=blight.__version__))
+        sys.stdout.write("\n")
+    else:
+        output = {
+            "binary": str(binary_path),
+            "checks": checks,
+            "findings": [f.to_dict() for f in findings],
+        }
+        json.dump(output, sys.stdout, indent=2)
+        sys.stdout.write("\n")
     return 0
 
 
