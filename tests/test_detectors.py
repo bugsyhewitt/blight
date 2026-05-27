@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
-from blight.detectors import cwe78, cwe120, cwe134, cwe242
+from blight.detectors import cwe78, cwe120, cwe134, cwe242, cwe676
 from tests.fake_session import (
+    asctime_vuln_session,
     clean_baseline_session,
+    ctime_vuln_session,
+    cwe676_all_session,
+    cwe676_clean_session,
     fprintf_fmtstr_vuln_session,
     gets_vuln_session,
+    mktemp_vuln_session,
     printf_constant_session,
     printf_fmtstr_vuln_session,
     printf_no_dangerous_imports_session,
+    rand_vuln_session,
     snprintf_fmtstr_vuln_session,
     strcpy_vuln_session,
+    strtok_vuln_session,
     syslog_fmtstr_vuln_session,
     system_constant_session,
     system_vuln_session,
+    tmpnam_vuln_session,
 )
 
 
@@ -117,6 +125,87 @@ class TestCwe134:
     def test_evidence_mentions_symbol(self) -> None:
         findings = cwe134.detect(printf_fmtstr_vuln_session())
         assert all("printf" in f.evidence for f in findings)
+
+
+class TestCwe676:
+    def test_flags_tmpnam(self) -> None:
+        findings = cwe676.detect(tmpnam_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 676
+        assert f.symbol == "tmpnam"
+        assert f.function == "make_path"
+        assert f.address == hex(0x401160)
+        assert "HIGH" in f.evidence
+        assert "mkstemp" in f.evidence
+
+    def test_flags_mktemp(self) -> None:
+        findings = cwe676.detect(mktemp_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 676
+        assert f.symbol == "mktemp"
+        assert f.function == "make_temp"
+        assert "HIGH" in f.evidence
+        assert "mkstemp" in f.evidence
+
+    def test_flags_strtok(self) -> None:
+        findings = cwe676.detect(strtok_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 676
+        assert f.symbol == "strtok"
+        assert f.function == "parse_line"
+        assert "MEDIUM" in f.evidence
+        assert "strtok_r" in f.evidence
+
+    def test_flags_asctime(self) -> None:
+        findings = cwe676.detect(asctime_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 676
+        assert f.symbol == "asctime"
+        assert f.function == "fmt_time"
+        assert "LOW" in f.evidence
+        assert "asctime_r" in f.evidence
+
+    def test_flags_ctime(self) -> None:
+        findings = cwe676.detect(ctime_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 676
+        assert f.symbol == "ctime"
+        assert f.function == "stamp"
+        assert "LOW" in f.evidence
+        assert "ctime_r" in f.evidence
+
+    def test_flags_rand(self) -> None:
+        findings = cwe676.detect(rand_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 676
+        assert f.symbol == "rand"
+        assert f.function == "gen_token"
+        assert "MEDIUM" in f.evidence
+        assert "getrandom" in f.evidence
+
+    def test_flags_all_six_functions(self) -> None:
+        findings = cwe676.detect(cwe676_all_session())
+        symbols = {f.symbol for f in findings}
+        assert symbols == {"tmpnam", "mktemp", "strtok", "asctime", "ctime", "rand"}
+        for f in findings:
+            assert f.cwe == 676
+            assert f.function
+            assert f.address.startswith("0x")
+            assert f.evidence
+
+    def test_clean_session_no_findings(self) -> None:
+        # Only the safe *_r / mkstemp / getrandom replacements are imported.
+        assert cwe676.detect(cwe676_clean_session()) == []
+
+    def test_does_not_flag_absent_function(self) -> None:
+        # clean-baseline has none of the CWE-676 functions.
+        assert cwe676.detect(clean_baseline_session()) == []
 
 
 class TestCwe78:

@@ -240,3 +240,80 @@ def printf_no_dangerous_imports_session() -> FakeR2Session:
         Import(name="fgets", plt=0x401040),
     ]
     return FakeR2Session(imports, xrefs={})
+
+
+# --- CWE-676 potentially-dangerous-function fixtures -----------------------
+
+def tmpnam_vuln_session() -> FakeR2Session:
+    """A single tmpnam() call (TOCTOU race)."""
+    imports = [Import(name="tmpnam", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "make_path", "call sym.imp.tmpnam")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def mktemp_vuln_session() -> FakeR2Session:
+    """A single mktemp() call (TOCTOU race)."""
+    imports = [Import(name="mktemp", plt=0x401050)]
+    xrefs = {0x401050: [Xref(0x401172, "CALL", "make_temp", "call sym.imp.mktemp")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def strtok_vuln_session() -> FakeR2Session:
+    """A single strtok() call (non-reentrant)."""
+    imports = [Import(name="strtok", plt=0x401060)]
+    xrefs = {0x401060: [Xref(0x401184, "CALL", "parse_line", "call sym.imp.strtok")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def asctime_vuln_session() -> FakeR2Session:
+    """A single asctime() call (non-reentrant static buffer)."""
+    imports = [Import(name="asctime", plt=0x401070)]
+    xrefs = {0x401070: [Xref(0x401196, "CALL", "fmt_time", "call sym.imp.asctime")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def ctime_vuln_session() -> FakeR2Session:
+    """A single ctime() call (non-reentrant static buffer)."""
+    imports = [Import(name="ctime", plt=0x401080)]
+    xrefs = {0x401080: [Xref(0x4011a8, "CALL", "stamp", "call sym.imp.ctime")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def rand_vuln_session() -> FakeR2Session:
+    """A single rand() call (predictable PRNG)."""
+    imports = [Import(name="rand", plt=0x401090)]
+    xrefs = {0x401090: [Xref(0x4011ba, "CALL", "gen_token", "call sym.imp.rand")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe676_all_session() -> FakeR2Session:
+    """All six CWE-676 functions, each called once in a distinct function."""
+    imports = [
+        Import(name="tmpnam", plt=0x401040),
+        Import(name="mktemp", plt=0x401050),
+        Import(name="strtok", plt=0x401060),
+        Import(name="asctime", plt=0x401070),
+        Import(name="ctime", plt=0x401080),
+        Import(name="rand", plt=0x401090),
+        Import(name="snprintf", plt=0x4010a0),  # safe neighbour, must not fire
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "make_path", "call sym.imp.tmpnam")],
+        0x401050: [Xref(0x401172, "CALL", "make_temp", "call sym.imp.mktemp")],
+        0x401060: [Xref(0x401184, "CALL", "parse_line", "call sym.imp.strtok")],
+        0x401070: [Xref(0x401196, "CALL", "fmt_time", "call sym.imp.asctime")],
+        0x401080: [Xref(0x4011a8, "CALL", "stamp", "call sym.imp.ctime")],
+        0x401090: [Xref(0x4011ba, "CALL", "gen_token", "call sym.imp.rand")],
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe676_clean_session() -> FakeR2Session:
+    """Only safe replacements imported — no CWE-676 function present."""
+    imports = [
+        Import(name="mkstemp", plt=0x401040),
+        Import(name="strtok_r", plt=0x401050),
+        Import(name="asctime_r", plt=0x401060),
+        Import(name="getrandom", plt=0x401070),
+    ]
+    return FakeR2Session(imports, xrefs={})

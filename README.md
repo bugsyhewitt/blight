@@ -43,22 +43,24 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {78,120,242,all}] [--format json]
+blight --binary PATH [--checks {78,120,134,242,676,all}] [--format json]
 ```
 
 - `--binary` — path to the ELF binary to analyze (required)
-- `--checks` — which CWE check to run; one of `78`, `120`, `242`, or `all`
-  (default: `all`)
+- `--checks` — which CWE check to run; one of `78`, `120`, `134`, `242`, `676`,
+  or `all` (default: `all`)
 - `--format` — output format; `json` (default)
 
 Output is a JSON object with the analyzed `binary`, the `checks` run, and a
 list of `findings`. Each finding carries `cwe`, `function`, `address`,
 `evidence`, and the dangerous `symbol`.
 
-## Detected CWE classes (v0.1)
+## Detected CWE classes
 
-`blight` v0.1 detects three well-defined classes that are reliably catchable
-via static disassembly + cross-reference analysis.
+`blight` detects well-defined classes that are reliably catchable via static
+disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
+in v0.1; CWE-134 and CWE-676 were added post-v0.1 (see
+[POST_V01.md](POST_V01.md)).
 
 ### CWE-78 — OS Command Injection
 
@@ -104,6 +106,14 @@ $ blight --binary tests/fixtures/strcpy-vuln --checks 120 --format json
 }
 ```
 
+### CWE-134 — Use of Externally-Controlled Format String
+
+Calls to the `printf` family (`printf`, `fprintf`, `syslog`, `snprintf`,
+`vprintf`, `vsprintf`, `vfprintf`, `vsyslog`) **where the format-string argument
+is not a constant string literal**. A literal format such as
+`printf("Hello %s\n", name)` is not flagged; a format built from a buffer or
+variable is.
+
 ### CWE-242 — Use of Inherently Dangerous Function
 
 Calls to functions that cannot be used safely under any circumstances:
@@ -121,6 +131,38 @@ $ blight --binary tests/fixtures/gets-vuln --checks 242 --format json
       "address": "0x401159",
       "evidence": "call to gets: gets cannot be used safely and was removed from C11",
       "symbol": "gets"
+    }
+  ]
+}
+```
+
+### CWE-676 — Use of Potentially Dangerous Function
+
+Calls to libc functions that have a direct, safer replacement and no good
+reason to appear in new code. This is a pure PLT-lookup check — any call site is
+flagged; the severity is surfaced in the evidence string.
+
+| Symbol | Severity | Why it's flagged | Use instead |
+|---|---|---|---|
+| `tmpnam` | HIGH | TOCTOU race condition | `mkstemp()` |
+| `mktemp` | HIGH | TOCTOU race condition | `mkstemp()` |
+| `strtok` | MEDIUM | Non-reentrant (static state) | `strtok_r()` |
+| `rand` | MEDIUM | Predictable PRNG | `getrandom()` |
+| `asctime` | LOW | Non-reentrant (static buffer) | `asctime_r()` |
+| `ctime` | LOW | Non-reentrant (static buffer) | `ctime_r()` |
+
+```bash
+$ blight --binary path/to/elf --checks 676 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [676],
+  "findings": [
+    {
+      "cwe": 676,
+      "function": "make_path",
+      "address": "0x401160",
+      "evidence": "[HIGH] call to tmpnam: Use of tmpnam() has race condition; use mkstemp()",
+      "symbol": "tmpnam"
     }
   ]
 }
@@ -149,12 +191,12 @@ rebuild them.
 
 ## Scope (v0.1)
 
-In scope: ELF (x86_64), the three CWE classes above, JSON output, pattern
-matching on disassembly.
+In scope: ELF (x86_64), the CWE classes above, JSON output, pattern matching on
+disassembly.
 
-Not in scope for v0.1 (deferred): Ghidra integration, PE binaries, non-x86_64
-architectures (ARM/MIPS/PPC), additional CWE classes, symbolic execution /
-taint analysis, firmware analysis.
+Not in scope (deferred): Ghidra integration, PE binaries, non-x86_64
+architectures (ARM/MIPS/PPC), symbolic execution / taint analysis, firmware
+analysis. Additional CWE classes are tracked in [POST_V01.md](POST_V01.md).
 
 See [POST_V01.md](POST_V01.md) for the ranked backlog of post-v0.1 directions.
 

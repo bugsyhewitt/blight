@@ -14,7 +14,7 @@ item is complete, move it to `## Shipped` at the bottom and update `README.md`.
 
 ## Ranked Backlog
 
-### 1. CWE-134 — Format String Detection  ★★★★★
+### 1. CWE-134 — Format String Detection  ★★★★★  ✅ SHIPPED
 **Complexity:** Low (`detector-only`)  
 **Requires:** New `src/blight/detectors/cwe134.py` + fake session fixtures + tests.  
 **Architecture change:** None. Follows the identical PLT-lookup + xref pattern as CWE-120.
@@ -41,7 +41,7 @@ complementary, not redundant.
 
 ---
 
-### 2. Additional Inherently Dangerous Functions (CWE-676 / CWE-242 extension)  ★★★★☆
+### 2. Additional Inherently Dangerous Functions (CWE-676 / CWE-242 extension)  ★★★★☆  ✅ SHIPPED
 **Complexity:** Low (`detector-only`)  
 **Requires:** Extend `src/blight/detectors/cwe242.py` (or add `cwe676.py`) + test cases.  
 **Architecture change:** None.
@@ -208,4 +208,15 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
-*(Items moved here after merging to main.)*
+- **CWE-134 — Format String Detection** (Rank 1). `src/blight/detectors/cwe134.py`
+  flags `printf`/`fprintf`/`syslog`/`snprintf`/`vprintf`/`vsprintf`/`vfprintf`/
+  `vsyslog` call sites where the format-string register is loaded from a
+  non-constant source. Registered as check `134`.
+
+- **CWE-676 — Use of Potentially Dangerous Function** (Rank 2).
+  `src/blight/detectors/cwe676.py` flags any call site to `tmpnam`, `mktemp`
+  (HIGH — TOCTOU race, use `mkstemp`), `strtok` (MEDIUM — non-reentrant, use
+  `strtok_r`), `asctime`/`ctime` (LOW — non-reentrant, use `*_r`), and `rand`
+  (MEDIUM — predictable PRNG, use `getrandom`). Pure PLT-lookup detection; the
+  symbol is the finding. Registered as check `676`. Severity is surfaced in the
+  evidence string.
