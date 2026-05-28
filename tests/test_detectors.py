@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
-from blight.detectors import cwe78, cwe120, cwe134, cwe242, cwe476, cwe676
+from blight.detectors import cwe78, cwe120, cwe134, cwe242, cwe252, cwe476, cwe676
 from tests.fake_session import (
     arm64_malloc_checked_session,
     arm64_malloc_deref_vuln_session,
+    arm64_setuid_checked_session,
+    arm64_setuid_unchecked_vuln_session,
     asctime_vuln_session,
     calloc_stored_escapes_session,
+    chroot_unchecked_fallthrough_session,
     clean_baseline_session,
     ctime_vuln_session,
+    cwe252_clean_session,
     cwe476_no_allocators_session,
     cwe676_all_session,
     cwe676_clean_session,
@@ -25,6 +29,9 @@ from tests.fake_session import (
     printf_fmtstr_vuln_session,
     printf_no_dangerous_imports_session,
     rand_vuln_session,
+    fclose_unchecked_call_clobber_session,
+    setuid_checked_session,
+    setuid_unchecked_vuln_session,
     snprintf_fmtstr_vuln_session,
     strcpy_vuln_session,
     strtok_vuln_session,
@@ -32,6 +39,7 @@ from tests.fake_session import (
     system_constant_session,
     system_vuln_session,
     tmpnam_vuln_session,
+    write_return_saved_session,
 )
 
 
@@ -273,6 +281,56 @@ class TestCwe476:
 
     def test_arm64_does_not_flag_when_cbz_guarded(self) -> None:
         assert cwe476.detect(arm64_malloc_checked_session()) == []
+
+
+class TestCwe252:
+    def test_flags_setuid_return_clobbered(self) -> None:
+        findings = cwe252.detect(setuid_unchecked_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 252
+        assert f.symbol == "setuid"
+        assert f.function == "drop_privs"
+        assert f.address == hex(0x401150)
+        assert "unchecked return value" in f.evidence
+        assert f.confidence == "low"
+
+    def test_does_not_flag_when_return_tested(self) -> None:
+        # test eax, eax before discard → the return was checked.
+        assert cwe252.detect(setuid_checked_session()) == []
+
+    def test_does_not_flag_when_return_saved(self) -> None:
+        # mov rbx, rax reads the return value → used, not discarded.
+        assert cwe252.detect(write_return_saved_session()) == []
+
+    def test_flags_fclose_clobbered_by_following_call(self) -> None:
+        findings = cwe252.detect(fclose_unchecked_call_clobber_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "fclose"
+        assert findings[0].function == "finish"
+
+    def test_flags_chroot_return_discarded_at_function_end(self) -> None:
+        findings = cwe252.detect(chroot_unchecked_fallthrough_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "chroot"
+        assert findings[0].function == "enter_jail"
+
+    def test_clean_session_no_findings(self) -> None:
+        assert cwe252.detect(cwe252_clean_session()) == []
+
+    def test_clean_baseline_no_findings(self) -> None:
+        assert cwe252.detect(clean_baseline_session()) == []
+
+    def test_arm64_flags_setuid_clobber(self) -> None:
+        findings = cwe252.detect(arm64_setuid_unchecked_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 252
+        assert f.symbol == "setuid"
+        assert f.function == "drop_privs"
+
+    def test_arm64_does_not_flag_when_cbz_guarded(self) -> None:
+        assert cwe252.detect(arm64_setuid_checked_session()) == []
 
 
 class TestCwe78:
