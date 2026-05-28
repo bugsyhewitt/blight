@@ -43,13 +43,13 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {78,120,134,242,676,all}] [--format json] [--workers N]
+blight --binary PATH [--checks {78,120,134,242,476,676,all}] [--format json] [--workers N]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
-- `--checks` — which CWE check to run; one of `78`, `120`, `134`, `242`, `676`,
-  or `all` (default: `all`)
+- `--checks` — which CWE check to run; one of `78`, `120`, `134`, `242`, `476`,
+  `676`, or `all` (default: `all`)
 - `--format` — output format; `json` (default) or `sarif`
 - `--workers` — number of parallel worker threads for a directory scan
   (default: `1`, sequential). Ignored when `--binary` is a single file.
@@ -77,7 +77,7 @@ and `findings` list:
 ```json
 {
   "directory": "./firmware/bin",
-  "checks": [78, 120, 134, 242, 676],
+  "checks": [78, 120, 134, 242, 476, 676],
   "results": [
     { "binary": "./firmware/bin/httpd",  "findings": [ /* ... */ ] },
     { "binary": "./firmware/bin/telnetd", "findings": [ /* ... */ ] }
@@ -103,7 +103,7 @@ is, not how severe the bug would be if exploited:
 |---|---|---|
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-120, CWE-242, CWE-676 (HIGH-severity symbols) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-78, CWE-134, CWE-676 (MEDIUM-severity symbols) |
-| `low` | The pattern is weakly indicative. | CWE-676 (LOW-severity symbols) |
+| `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
@@ -113,7 +113,7 @@ emitted in `--format sarif` output under each result's `properties.confidence`.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-134 and CWE-676 were added post-v0.1 (see
+in v0.1; CWE-134, CWE-476, and CWE-676 were added post-v0.1 (see
 [POST_V01.md](POST_V01.md)).
 
 ### CWE-78 — OS Command Injection
@@ -197,6 +197,44 @@ $ blight --binary tests/fixtures/gets-vuln --checks 242 --format json
 }
 ```
 
+### CWE-476 — NULL Pointer Dereference
+
+Pointers returned by a *nullable allocator* — `malloc`, `calloc`, `realloc`,
+`strdup`, `strndup`, `fopen`, `fdopen`, `freopen`, `opendir`, `getenv` — that
+are **dereferenced later in the same function with no intervening NULL check**.
+On failure these functions return `NULL`; using the result unchecked
+dereferences a null pointer.
+
+This is a taint-propagation check (the source is the allocator return, the sink
+is a memory access through the returned pointer, the sanitizer is any NULL
+guard between them). The detector tracks the return register (`rax` on x86_64,
+`x0` on AArch64) and any register the pointer is moved into, then scans forward
+from the call site: a `test`/`cmp`-against-zero (x86_64) or `cbz`/`cbnz`/`cmp
+#0` (AArch64) on the pointer is treated as a guard and **suppresses** the
+finding; a dereference (`[reg]` memory operand) reached *before* any guard is
+flagged. A pointer that escapes (stored to memory, passed onward) before any
+visible dereference is **not** flagged. The heuristic is intentionally
+conservative — no CFG reconstruction, no inter-procedural analysis — and every
+CWE-476 finding is therefore `low` confidence.
+
+```bash
+$ blight --binary path/to/elf --checks 476 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [476],
+  "findings": [
+    {
+      "cwe": 476,
+      "function": "build",
+      "address": "0x401150",
+      "evidence": "return value of malloc dereferenced without a NULL check (possible NULL pointer dereference on allocation failure)",
+      "symbol": "malloc",
+      "confidence": "low"
+    }
+  ]
+}
+```
+
 ### CWE-676 — Use of Potentially Dangerous Function
 
 Calls to libc functions that have a direct, safer replacement and no good
@@ -238,7 +276,9 @@ The CWE-120, CWE-242, and CWE-676 detectors flag any call site to a dangerous
 symbol and are therefore architecture-agnostic — they work on every
 architecture radare2 can disassemble. The CWE-78 and CWE-134 detectors inspect
 the register that carries a specific argument (the command string, the format
-string), which depends on the calling convention:
+string), and CWE-476 inspects the *return* register (`rax`/`x0`) plus the
+architecture's NULL-guard idioms; all three resolve the register convention
+per-architecture, so they work on x86_64 and AArch64:
 
 | Argument | x86_64 (SysV) | AArch64 (AAPCS64) |
 |---|---|---|
