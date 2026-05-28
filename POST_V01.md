@@ -110,7 +110,7 @@ to blight's register-alias table and the `r2.py` session (add an `arch()` method
 
 ---
 
-### 6. CWE-476 — NULL Pointer Dereference  ★★★☆☆
+### 6. CWE-476 — NULL Pointer Dereference  ★★★☆☆  ✅ SHIPPED
 **Complexity:** Medium (`detector-only`, but heuristic is harder)  
 **Requires:** New `src/blight/detectors/cwe476.py` + fixtures; must define a conservative
 heuristic for statically detectable patterns.  
@@ -175,8 +175,8 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 4. **If expanding to IoT/embedded targets:** Pick item 5 (ARM) before adding more
    CWE classes — coverage breadth matters more than CWE depth for that audience.
 
-5. **Do not pick items 6, 7, or 8 first.** They have higher effort, lower precision,
-   or depend on earlier items (4 for confidence labels, CFG for 7).
+5. **Do not pick items 7 or 8 first.** They have higher effort, lower precision,
+   or depend on earlier items (CFG for 7). Item 6 (CWE-476) has shipped.
 
 ---
 
@@ -207,6 +207,22 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 ---
 
 ## Shipped
+
+- **CWE-476 — NULL Pointer Dereference** (Rank 6).
+  `src/blight/detectors/cwe476.py` flags the common pattern where a pointer
+  returned by a nullable allocator (`malloc`/`calloc`/`realloc`/`strdup`/
+  `strndup`/`fopen`/`fdopen`/`freopen`/`opendir`/`getenv`) is dereferenced
+  later in the same function with no intervening NULL guard. It is a
+  taint-propagation detector: the source is the allocator return register
+  (`rax`/`x0`), tracked through register-to-register `mov` aliases; the sink is
+  a memory operand `[reg]` through a live pointer register; the sanitizer is a
+  `test`/`cmp #0` (x86_64) or `cbz`/`cbnz`/`cmp #0` (AArch64) on the pointer.
+  Reaching a guard first suppresses the finding; a pointer that escapes (stored
+  to memory / passed onward) before any visible deref is not flagged. No CFG or
+  inter-procedural analysis — a single-function forward linear scan — so every
+  finding is `low` confidence per the rank-6 guidance. Architecture-aware on
+  x86_64 and AArch64. Registered as check `476`. See the `TestCwe476` block in
+  `tests/test_detectors.py` and the CWE-476 fixtures in `tests/fake_session.py`.
 
 - **Parallel directory scanning (`--workers N`)**. `--binary` now accepts a
   directory; `blight` discovers every regular file under it (recursively, sorted

@@ -324,6 +324,142 @@ def cwe676_clean_session() -> FakeR2Session:
     return FakeR2Session(imports, xrefs={})
 
 
+# --- CWE-476 NULL-pointer-dereference fixtures -----------------------------
+#
+# Pattern: an allocator (malloc/calloc/fopen/...) returns a pointer in rax.
+# Vulnerable cases dereference it (memory operand through the pointer register)
+# with no intervening NULL guard. Safe cases test/cmp the pointer first.
+
+def malloc_deref_vuln_session() -> FakeR2Session:
+    """malloc() result dereferenced immediately, no NULL check (vulnerable)."""
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "build", "call sym.imp.malloc")]}
+    # rax = malloc(...); *(int*)rax = 0  -> deref through rax, no test/cmp.
+    build_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0x10"),
+        Instruction(0x401150, "call sym.imp.malloc"),
+        Instruction(0x401155, "mov dword [rax], 0"),   # deref, no guard
+        Instruction(0x40115c, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: build_ops})
+
+
+def malloc_checked_session() -> FakeR2Session:
+    """malloc() result NULL-checked before use (safe — must NOT flag)."""
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "build", "call sym.imp.malloc")]}
+    # rax = malloc(...); test rax, rax; je fail; *(int*)rax = 0
+    build_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0x10"),
+        Instruction(0x401150, "call sym.imp.malloc"),
+        Instruction(0x401155, "test rax, rax"),         # NULL guard
+        Instruction(0x401158, "je 0x401170"),
+        Instruction(0x40115e, "mov dword [rax], 0"),     # deref AFTER guard
+        Instruction(0x401165, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: build_ops})
+
+
+def malloc_aliased_checked_session() -> FakeR2Session:
+    """malloc() result moved to rbx, then rbx is NULL-checked (safe).
+
+    Exercises the register-alias tracking: the guard is on rbx, not rax."""
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "build", "call sym.imp.malloc")]}
+    build_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.malloc"),
+        Instruction(0x401155, "mov rbx, rax"),          # alias: rbx = ptr
+        Instruction(0x401158, "test rbx, rbx"),          # guard on the alias
+        Instruction(0x40115b, "je 0x401180"),
+        Instruction(0x401161, "mov dword [rbx], 1"),     # deref after guard
+        Instruction(0x401168, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: build_ops})
+
+
+def malloc_aliased_deref_vuln_session() -> FakeR2Session:
+    """malloc() result moved to rbx, dereferenced via rbx, no guard (vulnerable)."""
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "build", "call sym.imp.malloc")]}
+    build_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.malloc"),
+        Instruction(0x401155, "mov rbx, rax"),          # alias: rbx = ptr
+        Instruction(0x401158, "mov rcx, [rbx]"),         # deref via alias, no guard
+        Instruction(0x40115f, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: build_ops})
+
+
+def fopen_deref_vuln_session() -> FakeR2Session:
+    """fopen() result passed-through then dereferenced without a NULL check."""
+    imports = [Import(name="fopen", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x4011a0, "CALL", "read_cfg", "call sym.imp.fopen")]}
+    read_cfg_ops = [
+        Instruction(0x401180, "push rbp"),
+        Instruction(0x4011a0, "call sym.imp.fopen"),
+        Instruction(0x4011a5, "mov rsi, [rax]"),         # deref FILE*, no guard
+        Instruction(0x4011ac, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401180: read_cfg_ops})
+
+
+def calloc_stored_escapes_session() -> FakeR2Session:
+    """calloc() result stored to the stack and never dereferenced in-function.
+
+    The pointer escapes (we can't see the deref) — conservatively NOT flagged."""
+    imports = [Import(name="calloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "alloc_it", "call sym.imp.calloc")]}
+    alloc_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.calloc"),
+        Instruction(0x401155, "mov qword [rbp - 0x8], rax"),  # store to stack (escape)
+        Instruction(0x40115d, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: alloc_ops})
+
+
+def cwe476_no_allocators_session() -> FakeR2Session:
+    """A session with no nullable-allocator imports — nothing to flag."""
+    imports = [
+        Import(name="puts", plt=0x401030),
+        Import(name="strlen", plt=0x401040),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
+def arm64_malloc_deref_vuln_session() -> FakeR2Session:
+    """AArch64: malloc() result (x0) dereferenced with no cbz/cmp guard."""
+    imports = [Import(name="malloc", plt=0x710)]
+    xrefs = {0x710: [Xref(0x83c, "CALL", "build", "bl sym.imp.malloc")]}
+    build_ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x838, "mov w0, 0x10"),
+        Instruction(0x83c, "bl sym.imp.malloc"),
+        Instruction(0x840, "str wzr, [x0]"),             # deref x0, no guard
+        Instruction(0x844, "ldp x29, x30, [sp], 0x20"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: build_ops}, arch="arm64")
+
+
+def arm64_malloc_checked_session() -> FakeR2Session:
+    """AArch64: malloc() result (x0) guarded with cbz before deref (safe)."""
+    imports = [Import(name="malloc", plt=0x710)]
+    xrefs = {0x710: [Xref(0x83c, "CALL", "build", "bl sym.imp.malloc")]}
+    build_ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x838, "mov w0, 0x10"),
+        Instruction(0x83c, "bl sym.imp.malloc"),
+        Instruction(0x840, "cbz x0, 0x860"),             # NULL guard
+        Instruction(0x844, "str wzr, [x0]"),             # deref after guard
+        Instruction(0x848, "ldp x29, x30, [sp], 0x20"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: build_ops}, arch="arm64")
+
+
 # --- AArch64 (arm64) fixtures (POST_V01 item 5) ----------------------------
 #
 # On AArch64 the first integer/pointer argument lives in x0 (w0 for the 32-bit

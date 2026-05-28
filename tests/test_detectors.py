@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
-from blight.detectors import cwe78, cwe120, cwe134, cwe242, cwe676
+from blight.detectors import cwe78, cwe120, cwe134, cwe242, cwe476, cwe676
 from tests.fake_session import (
+    arm64_malloc_checked_session,
+    arm64_malloc_deref_vuln_session,
     asctime_vuln_session,
+    calloc_stored_escapes_session,
     clean_baseline_session,
     ctime_vuln_session,
+    cwe476_no_allocators_session,
     cwe676_all_session,
     cwe676_clean_session,
+    fopen_deref_vuln_session,
     fprintf_fmtstr_vuln_session,
     gets_vuln_session,
+    malloc_aliased_checked_session,
+    malloc_aliased_deref_vuln_session,
+    malloc_checked_session,
+    malloc_deref_vuln_session,
     mktemp_vuln_session,
     printf_constant_session,
     printf_fmtstr_vuln_session,
@@ -206,6 +215,64 @@ class TestCwe676:
     def test_does_not_flag_absent_function(self) -> None:
         # clean-baseline has none of the CWE-676 functions.
         assert cwe676.detect(clean_baseline_session()) == []
+
+
+class TestCwe476:
+    def test_flags_malloc_deref_without_check(self) -> None:
+        findings = cwe476.detect(malloc_deref_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 476
+        assert f.symbol == "malloc"
+        assert f.function == "build"
+        assert f.address == hex(0x401150)
+        assert "NULL" in f.evidence
+        assert f.confidence == "low"
+
+    def test_does_not_flag_when_null_checked(self) -> None:
+        # test rax, rax before the deref → safe.
+        assert cwe476.detect(malloc_checked_session()) == []
+
+    def test_does_not_flag_when_alias_checked(self) -> None:
+        # Pointer moved to rbx, rbx is tested before deref → safe.
+        assert cwe476.detect(malloc_aliased_checked_session()) == []
+
+    def test_flags_deref_through_alias(self) -> None:
+        # Pointer moved to rbx, dereferenced via rbx, no guard → flagged.
+        findings = cwe476.detect(malloc_aliased_deref_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "malloc"
+        assert findings[0].function == "build"
+
+    def test_flags_fopen_deref(self) -> None:
+        findings = cwe476.detect(fopen_deref_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 476
+        assert f.symbol == "fopen"
+        assert f.function == "read_cfg"
+        assert f.confidence == "low"
+
+    def test_does_not_flag_when_pointer_escapes_to_stack(self) -> None:
+        # calloc result stored to the stack; no in-function deref we can see.
+        assert cwe476.detect(calloc_stored_escapes_session()) == []
+
+    def test_no_allocator_imports_no_findings(self) -> None:
+        assert cwe476.detect(cwe476_no_allocators_session()) == []
+
+    def test_clean_baseline_no_findings(self) -> None:
+        assert cwe476.detect(clean_baseline_session()) == []
+
+    def test_arm64_flags_malloc_deref(self) -> None:
+        findings = cwe476.detect(arm64_malloc_deref_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 476
+        assert f.symbol == "malloc"
+        assert f.function == "build"
+
+    def test_arm64_does_not_flag_when_cbz_guarded(self) -> None:
+        assert cwe476.detect(arm64_malloc_checked_session()) == []
 
 
 class TestCwe78:
