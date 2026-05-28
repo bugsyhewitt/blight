@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import blight
+from blight.confidence_filter import CONFIDENCE_CHOICES, filter_findings
 from blight.detectors import DETECTORS
 from blight.formatters.sarif import dump_sarif
 from blight.scan import ScanResult, scan_targets
@@ -78,6 +79,16 @@ def build_parser() -> argparse.ArgumentParser:
             "'function', 'address', 'symbol'."
         ),
     )
+    parser.add_argument(
+        "--min-confidence",
+        default="low",
+        choices=list(CONFIDENCE_CHOICES),
+        help=(
+            "drop findings below this triage confidence before output. "
+            "'high' keeps only high-confidence findings; 'medium' keeps "
+            "medium and high; 'low' (default) keeps everything."
+        ),
+    )
     return parser
 
 
@@ -123,6 +134,9 @@ def main(argv: list[str] | None = None) -> int:
             [str(p) for p in binaries], checks, workers=args.workers
         )
         results = [_apply_suppressions(r, suppressions) for r in results]
+        results = [
+            _apply_min_confidence(r, args.min_confidence) for r in results
+        ]
         _emit_directory(target, checks, results, args.format)
         return 0
 
@@ -133,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
     # consumers (and tests) are unaffected.
     [result] = scan_targets([str(target)], checks, workers=1)
     result = _apply_suppressions(result, suppressions)
+    result = _apply_min_confidence(result, args.min_confidence)
     _emit_single(str(target), checks, result, args.format)
     return 0
 
@@ -150,6 +165,22 @@ def _apply_suppressions(
     return ScanResult(
         binary=result.binary,
         findings=suppressions.apply(result.findings),
+        error=result.error,
+    )
+
+
+def _apply_min_confidence(result: ScanResult, minimum: str) -> ScanResult:
+    """Return ``result`` with findings below ``minimum`` confidence dropped.
+
+    ``minimum == "low"`` is the default and keeps everything (identity), so an
+    errored result (no findings) is returned untouched and the common case adds
+    no allocation churn. The ``error`` field is always preserved.
+    """
+    if minimum == "low":
+        return result
+    return ScanResult(
+        binary=result.binary,
+        findings=filter_findings(result.findings, minimum),
         error=result.error,
     )
 

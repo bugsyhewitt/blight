@@ -208,6 +208,27 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **`--min-confidence` Triage Threshold Filter** (post-backlog; pairs with
+  Rank 4 confidence scoring). `src/blight/confidence_filter.py` adds a
+  `--min-confidence {low,medium,high}` CLI flag that drops every finding below
+  the chosen triage confidence before output. The threshold is inclusive and
+  ordered `low < medium < high`, so `high` keeps only high-confidence findings,
+  `medium` keeps medium and high, and `low` (the default) is the identity
+  filter that keeps everything — making the flag fully backward compatible.
+  Like `--suppress` it is a pure output-layer filter (detectors and the
+  analyzed binary are untouched), applied uniformly to single-file and
+  directory scans and to both `json` and `sarif` output via
+  `_apply_min_confidence` in `cli.py`, and it composes with `--suppress`
+  (suppression runs first, then the confidence threshold). Errored results are
+  passed through untouched (no findings to filter, `error` preserved). This
+  turns the Rank-4 confidence labels into an actionable CI gate without any
+  post-processing of the JSON. Chosen as the next improvement because all eight
+  ranked backlog items had already shipped and the remaining high-yield
+  CWE classes (CWE-190 integer overflow, CWE-416 use-after-free) require
+  symbolic execution / heap modeling that is out of scope for blight's
+  PLT-and-disassembly static approach (see Research Notes). See
+  `tests/test_confidence_filter.py`.
+
 - **`--suppress` File for Known False Positives** (Rank 8).
   `src/blight/suppressions.py` adds a `--suppress FILE` CLI flag that loads a
   JSON suppression file and drops matching findings from the output before it

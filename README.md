@@ -43,7 +43,7 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format json] [--workers N]
+blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format json] [--workers N] [--min-confidence {low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
@@ -56,6 +56,9 @@ blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format json]
 - `--suppress FILE` — path to a JSON suppression file listing known false
   positives to drop from the output (see **Suppressing known false positives**
   below)
+- `--min-confidence` — drop findings below this triage confidence before
+  output; one of `low` (default, keeps everything), `medium`, or `high` (see
+  **Filtering by confidence** below)
 
 For a single binary, the output is a JSON object with the analyzed `binary`, the
 `checks` run, and a list of `findings`. Each finding carries `cwe`, `function`,
@@ -111,6 +114,30 @@ is, not how severe the bug would be if exploited:
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
 emitted in `--format sarif` output under each result's `properties.confidence`.
+
+### Filtering by confidence
+
+`--min-confidence` drops every finding below a chosen triage confidence before
+output, so a CI gate can ask for only the highest-certainty findings without
+post-processing the JSON. The threshold is inclusive and ordered
+`low < medium < high`:
+
+| `--min-confidence` | Keeps |
+|---|---|
+| `low` (default) | everything |
+| `medium` | `medium` and `high` |
+| `high` | `high` only |
+
+```bash
+# Fail a pipeline only on high-confidence findings:
+blight --binary ./firmware/bin --checks all --min-confidence high
+```
+
+Like `--suppress`, this is a pure output-layer filter — the detectors and the
+analyzed binary are untouched — and it is applied uniformly to single-file and
+directory scans and to both `json` and `sarif` output. The two flags compose:
+`--suppress` removes named false positives and `--min-confidence` then drops
+whatever remains below the threshold.
 
 ### Suppressing known false positives
 
