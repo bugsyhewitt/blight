@@ -208,6 +208,30 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **`--format text` Human-Readable Console Output** (post-backlog;
+  CLI/output-layer direction). `src/blight/formatters/text.py` adds a third
+  `--format` choice alongside `json` and `sarif` that renders the findings as a
+  compact, grouped-by-function console report: a `binary`/`checks` header, a
+  finding count with a `high/medium/low` confidence breakdown, one block per
+  function (each finding line showing `[confidence] CWE-N symbol @ address`
+  plus the evidence string), and a closing per-CWE `summary` line ordered by
+  count. A clean binary prints `no findings`; a directory scan prints one
+  indented block per binary under a `directory:` header (errored binaries show
+  their `error` string), closed by a corpus `total:` line. Like the existing
+  output-layer filters it is purely additive — no detector, `Finding` model, or
+  architecture change — and it consumes exactly the findings that survive
+  `--suppress` and `--min-confidence`, with `--fail-on` evaluating the same
+  set, so the exit code always matches the rendered report. The format is
+  explicitly documented as a *report for humans* with no stability contract
+  (layout may change between releases); JSON and SARIF remain the machine
+  contracts. Chosen as the next improvement because all eight ranked backlog
+  items plus the three post-backlog CLI gates had shipped, leaving the
+  interactive-console case (where reading JSON through `jq` is friction) as the
+  natural next CLI/output-layer win, while the remaining high-yield CWE classes
+  (CWE-190 integer overflow, CWE-416 use-after-free) still require symbolic
+  execution / heap modeling that is out of scope for blight's static approach.
+  See `tests/test_text.py`.
+
 - **`--fail-on` CI Exit-Code Gate** (post-backlog; completes the CI story
   begun by Rank 4 confidence scoring and the `--min-confidence` filter).
   `src/blight/exit_gate.py` adds a `--fail-on {none,low,medium,high}` CLI flag
