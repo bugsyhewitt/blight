@@ -116,6 +116,9 @@ def detect(session: R2Session) -> list[Finding]:
                     "(possible format string injection)"
                 ),
                 symbol=symbol,
+                # Same non-constant heuristic as CWE-78: it can miss aliased
+                # registers, so this is a medium-confidence finding.
+                confidence="medium",
             )
         )
     return findings

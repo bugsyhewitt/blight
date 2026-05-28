@@ -32,6 +32,9 @@ def detect(session) -> list[Finding]:
                 address=hex(xref.from_addr),
                 evidence=f"call to {symbol}: {_DESCRIPTIONS[symbol]}",
                 symbol=symbol,
+                # These functions have no safe call site; the symbol itself is
+                # the finding, so confidence is high.
+                confidence="high",
             )
         )
     return findings

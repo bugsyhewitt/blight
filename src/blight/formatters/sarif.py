@@ -94,6 +94,7 @@ def build_sarif(
             "properties": {
                 "address": f.address,
                 "symbol": f.symbol,
+                "confidence": f.confidence,
             },
         }
         for f in findings

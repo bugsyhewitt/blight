@@ -73,7 +73,7 @@ stage for future embalmer integration as a first-class pipeline source.
 
 ---
 
-### 4. Confidence Scoring on Findings  ★★★☆☆
+### 4. Confidence Scoring on Findings  ★★★☆☆  ✅ SHIPPED
 **Complexity:** Low (`arch-change` in Finding model)  
 **Requires:** Add `confidence: str` field (`high`/`medium`/`low`) to `Finding`; update
 all detectors to emit a confidence value; update JSON output schema.  
@@ -220,3 +220,13 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
   (MEDIUM — predictable PRNG, use `getrandom`). Pure PLT-lookup detection; the
   symbol is the finding. Registered as check `676`. Severity is surfaced in the
   evidence string.
+
+- **Confidence Scoring on Findings** (Rank 4). Every `Finding` now carries a
+  `confidence` label (`high`/`medium`/`low`), threaded through `to_dict()`,
+  the CLI JSON output, the SARIF `properties.confidence` field, and the
+  `pipeline_adapter` → `BinaryFinding` conversion (the `binary-finding-schema`
+  `BinaryFinding` already supports the field, defaulting to `medium`, so no
+  schema bump was needed). Policy: CWE-120/242 are `high` (the symbol is the
+  finding); CWE-78/134 are `medium` (the non-constant heuristic can miss
+  aliased registers); CWE-676 mirrors its per-symbol severity (HIGH→`high`,
+  MEDIUM→`medium`, LOW→`low`). See `tests/test_confidence.py`.

@@ -94,6 +94,10 @@ def detect(session: R2Session) -> list[Finding]:
                     "(possible OS command injection)"
                 ),
                 symbol=symbol,
+                # The non-constant heuristic can miss aliased registers and
+                # cannot prove the argument is attacker-controlled, so this is
+                # a medium-confidence finding.
+                confidence="medium",
             )
         )
     return findings

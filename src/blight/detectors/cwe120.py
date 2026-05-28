@@ -34,6 +34,9 @@ def detect(session) -> list[Finding]:
                 address=hex(xref.from_addr),
                 evidence=f"call to {symbol}: {_DESCRIPTIONS[symbol]}",
                 symbol=symbol,
+                # The presence of the unchecked-copy primitive IS the finding;
+                # no data-flow inference is involved, so confidence is high.
+                confidence="high",
             )
         )
     return findings
