@@ -146,7 +146,7 @@ confidence scoring is in place (item 4) so the `low`-confidence label can be app
 
 ---
 
-### 8. `--suppress` File for Known False Positives  ★★☆☆☆
+### 8. `--suppress` File for Known False Positives  ★★☆☆☆  ✅ SHIPPED
 **Complexity:** Medium (`arch-change` in CLI + engine)  
 **Requires:** Define a YAML/JSON suppression format; CLI `--suppress FILE` flag; engine
 filters findings against suppressions before output.  
@@ -207,6 +207,26 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 ---
 
 ## Shipped
+
+- **`--suppress` File for Known False Positives** (Rank 8).
+  `src/blight/suppressions.py` adds a `--suppress FILE` CLI flag that loads a
+  JSON suppression file and drops matching findings from the output before it
+  is emitted. It is a pure output-layer filter — detectors and the analyzed
+  binary are untouched — applied uniformly to single-file and directory scans
+  and to both `json` and `sarif` output (the CLI filters each `ScanResult`'s
+  findings in `_apply_suppressions` before `_emit_single`/`_emit_directory`).
+  A rule must carry `cwe` and may add any of `function`/`address`/`symbol` as
+  extra constraints; all present constraints must match (logical AND) and
+  omitted fields are wildcards, so `{"cwe": 120}` suppresses every CWE-120
+  finding while `{"cwe": 120, "symbol": "strcpy", "address": "0x40114a"}`
+  suppresses exactly one call site. `address` comparison is case-insensitive
+  and `0x`-prefix-tolerant; `cwe` accepts an int, a numeric string, or a
+  `"CWE-120"` string; `reason` and `"//"` keys are documentation-only and
+  ignored. JSON was chosen over YAML deliberately to avoid adding a
+  third-party parser — blight's pure-Python, no-extra-toolchain stance is part
+  of its niche. Malformed files raise `SuppressionError`, surfaced as an
+  `argparse` error that aborts the run before any scanning. See
+  `tests/test_suppressions.py`.
 
 - **CWE-252 — Unchecked Return Value** (Rank 7).
   `src/blight/detectors/cwe252.py` flags call sites to security- and
