@@ -208,6 +208,19 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **Parallel directory scanning (`--workers N`)**. `--binary` now accepts a
+  directory; `blight` discovers every regular file under it (recursively, sorted
+  by path) and scans them via `src/blight/scan.py`. `--workers N` fans the scan
+  out across a `ThreadPoolExecutor` — threads were chosen over processes because
+  each binary's analysis is dominated by I/O to the radare2 subprocess (the GIL
+  is released), avoiding pickling and keeping the fake-session test injection
+  path intact. `scan_targets` returns results in input order with each binary's
+  findings sorted identically regardless of `--workers`, so parallel output
+  equals sequential output exactly; a failure on one binary is isolated to that
+  result's `error` field and never aborts the rest. Directory JSON output is a
+  `{directory, checks, results[]}` object; single-file output keeps the legacy
+  `{binary, checks, findings}` shape. See `tests/test_scan.py`.
+
 - **CWE-134 — Format String Detection** (Rank 1). `src/blight/detectors/cwe134.py`
   flags `printf`/`fprintf`/`syslog`/`snprintf`/`vprintf`/`vsprintf`/`vfprintf`/
   `vsyslog` call sites where the format-string register is loaded from a

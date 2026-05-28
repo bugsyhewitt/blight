@@ -43,17 +43,54 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {78,120,134,242,676,all}] [--format json]
+blight --binary PATH [--checks {78,120,134,242,676,all}] [--format json] [--workers N]
 ```
 
-- `--binary` — path to the ELF binary to analyze (required)
+- `--binary` — path to the ELF binary **or a directory of binaries** to analyze
+  (required)
 - `--checks` — which CWE check to run; one of `78`, `120`, `134`, `242`, `676`,
   or `all` (default: `all`)
-- `--format` — output format; `json` (default)
+- `--format` — output format; `json` (default) or `sarif`
+- `--workers` — number of parallel worker threads for a directory scan
+  (default: `1`, sequential). Ignored when `--binary` is a single file.
 
-Output is a JSON object with the analyzed `binary`, the `checks` run, and a
-list of `findings`. Each finding carries `cwe`, `function`, `address`,
-`evidence`, the dangerous `symbol`, and a triage `confidence` label.
+For a single binary, the output is a JSON object with the analyzed `binary`, the
+`checks` run, and a list of `findings`. Each finding carries `cwe`, `function`,
+`address`, `evidence`, the dangerous `symbol`, and a triage `confidence` label.
+
+### Scanning a directory in parallel
+
+Point `--binary` at a directory and `blight` scans every regular file inside it
+(recursively). Add `--workers N` to fan the scan out across a thread pool —
+since each binary's analysis spends almost all its time blocked on the radare2
+subprocess, threads run truly concurrently and large-corpus scans get
+significantly faster.
+
+```bash
+blight --binary ./firmware/bin --checks all --workers 8
+```
+
+The directory output is a JSON object with the `directory`, the `checks` run,
+and a `results` array — one entry per binary, each with its own `binary` path
+and `findings` list:
+
+```json
+{
+  "directory": "./firmware/bin",
+  "checks": [78, 120, 134, 242, 676],
+  "results": [
+    { "binary": "./firmware/bin/httpd",  "findings": [ /* ... */ ] },
+    { "binary": "./firmware/bin/telnetd", "findings": [ /* ... */ ] }
+  ]
+}
+```
+
+Results are returned in sorted path order, and each binary's findings are sorted
+identically, **regardless of `--workers`** — a parallel scan produces output
+identical to a sequential one. A failure on a single binary (e.g. an unreadable
+file) is isolated: that entry carries an `"error"` string and the remaining
+binaries are still scanned. With `--format sarif`, a directory scan emits one
+SARIF document covering all findings across the corpus.
 
 ### Confidence scoring
 
