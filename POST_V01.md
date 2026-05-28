@@ -57,7 +57,7 @@ approaches zero because the functions themselves are the finding, with no contex
 
 ---
 
-### 3. SARIF Output Format  ★★★★☆
+### 3. SARIF Output Format  ★★★★☆  ✅ SHIPPED
 **Complexity:** Low (`arch-change` in output layer only)  
 **Requires:** Add `--format sarif` to CLI; add `src/blight/formatters/sarif.py`; tests.  
 **Architecture change:** CLI output layer only. No detector changes.
@@ -91,7 +91,7 @@ that project.
 
 ---
 
-### 5. ARM/aarch64 Architecture Support  ★★★☆☆
+### 5. ARM/aarch64 Architecture Support  ★★★☆☆  ✅ SHIPPED
 **Complexity:** Medium (`arch-change` in CWE-78 heuristic)  
 **Requires:** Abstract the register-convention logic in `cwe78.py` behind an
 architecture-aware helper; add AArch64 register names (`x0`, `w0`); integration test
@@ -230,3 +230,19 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
   finding); CWE-78/134 are `medium` (the non-constant heuristic can miss
   aliased registers); CWE-676 mirrors its per-symbol severity (HIGH→`high`,
   MEDIUM→`medium`, LOW→`low`). See `tests/test_confidence.py`.
+
+- **SARIF Output Format** (Rank 3). `--format sarif` emits SARIF 2.1.0 via
+  `src/blight/formatters/sarif.py`, with each finding's `confidence` surfaced
+  under `properties.confidence`. See `tests/test_sarif.py`.
+
+- **ARM/aarch64 Architecture Support** (Rank 5). The argument-register
+  convention used by the CWE-78 and CWE-134 heuristics is now resolved
+  per-architecture via `src/blight/detectors/_argregs.py`. `R2Session` gained an
+  `arch()` method (`Radare2Session` reads radare2's `iAj`; the fake takes an
+  `arch=` argument) that normalizes the binary's arch to `x86_64` or `arm64`,
+  falling back to x86_64 for unknown/32-bit-only targets. On AArch64 the first
+  three arguments are read from `x0`/`x1`/`x2` (with `w0`-`w2` aliases) instead
+  of `rdi`/`rsi`/`rdx`. CWE-120/242/676 were already register-agnostic and work
+  on ARM unchanged. 32-bit ARM/MIPS/PPC remain out of scope. See
+  `tests/test_arch.py` and the new `arch()` integration assertion in
+  `tests/test_integration.py`.

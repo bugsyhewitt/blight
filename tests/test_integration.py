@@ -75,3 +75,10 @@ def test_cwe242_on_gets_vuln(session_for) -> None:
 def test_clean_baseline_zero_findings(session_for) -> None:
     findings = run_checks(session_for("clean-baseline"), [78, 120, 242])
     assert findings == []
+
+
+@pytest.mark.skipif(not (_HAVE_R2 and _HAVE_R2PIPE), reason=_SKIP_REASON)
+def test_arch_detected_for_x86_64_fixtures(session_for) -> None:
+    # The shipped fixtures are x86_64 ELFs; arch() must resolve them via iAj to
+    # the normalized "x86_64" key so the register heuristics pick rdi/rsi/rdx.
+    assert session_for("system-vuln").arch() == "x86_64"

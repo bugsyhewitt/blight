@@ -5,17 +5,19 @@ is NOT a constant string literal. A constant command (e.g. ``system("ls")``)
 is uninteresting; a command built from a buffer or variable is the injection
 risk.
 
-Heuristic (x86_64, v0.1 scope): inspect the instructions in the containing
-function up to the call site. The first argument is passed in ``rdi``. If the
-instruction that last loads ``rdi`` references a string literal (radare2 names
-these ``str.*``), the argument is constant and we do NOT flag. Otherwise the
-argument is non-constant and we flag.
+Heuristic: inspect the instructions in the containing function up to the call
+site. The first argument is passed in an architecture-specific register
+(``rdi`` on x86_64, ``x0``/``w0`` on AArch64). If the instruction that last
+loads that register references a string literal (radare2 names these
+``str.*``), the argument is constant and we do NOT flag. Otherwise the argument
+is non-constant and we flag.
 
 [Worker decision: this is a deliberately conservative static heuristic, not
 taint analysis (taint/symbolic execution is explicitly post-v0.1). It correctly
 separates the shipped vulnerable fixture (argument built via snprintf into a
-stack buffer) from a constant-string call. Cross-architecture register
-conventions are deferred to v0.2 along with non-x86_64 support.]
+stack buffer) from a constant-string call. The register convention is resolved
+per-architecture via :mod:`blight.detectors._argregs` (POST_V01 item 5); x86_64
+and AArch64 are supported, with x86_64 as the conservative fallback.]
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ import re
 from blight.findings import Finding
 from blight.r2 import R2Session
 
+from ._argregs import arg_register_aliases
 from ._common import call_sites
 
 CWE = 78
@@ -32,15 +35,13 @@ CWE = 78
 # system + the exec* family.
 DANGEROUS = ("system", "execl", "execlp", "execle", "execv", "execvp", "execvpe")
 
-# Register holding the first integer/pointer argument under the SysV AMD64 ABI.
-_ARG0_REG = "rdi"
-# Sub-registers that alias rdi; a write to any of these sets the first arg.
-_ARG0_ALIASES = ("rdi", "edi", "di")
+# All these functions take the command/program as their FIRST argument.
+_ARG_INDEX = 0
 
 _STR_REF = re.compile(r"\bstr\.")
 
 
-def _arg_is_constant(instructions, call_addr: int) -> bool:
+def _arg_is_constant(instructions, call_addr: int, arg0_aliases: tuple[str, ...]) -> bool:
     """Return True if the last write to the arg0 register before ``call_addr``
     loads a string literal (``str.*``)."""
     last_arg0_load: str | None = None
@@ -54,7 +55,7 @@ def _arg_is_constant(instructions, call_addr: int) -> bool:
         if not m:
             continue
         dest = m.group(1)
-        if dest in _ARG0_ALIASES:
+        if dest in arg0_aliases:
             last_arg0_load = disasm
     if last_arg0_load is None:
         # Couldn't see how arg0 was set; treat as non-constant (flag it).
@@ -64,6 +65,8 @@ def _arg_is_constant(instructions, call_addr: int) -> bool:
 
 def detect(session: R2Session) -> list[Finding]:
     findings: list[Finding] = []
+
+    arg0_aliases = arg_register_aliases(session.arch(), _ARG_INDEX)
 
     # Cache disassembly per function to avoid re-querying.
     func_cache: dict[str, list] = {}
@@ -81,7 +84,7 @@ def detect(session: R2Session) -> list[Finding]:
             func_cache[func] = session.function_instructions(xref.from_addr)
         instructions = func_cache[func]
 
-        if _arg_is_constant(instructions, xref.from_addr):
+        if _arg_is_constant(instructions, xref.from_addr, arg0_aliases):
             continue  # constant command string — not flagged
 
         findings.append(
