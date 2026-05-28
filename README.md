@@ -83,7 +83,10 @@ in v0.1; CWE-134 and CWE-676 were added post-v0.1 (see
 
 Calls to `system()` and the `exec*()` family **where the command argument is
 not a constant string literal**. A constant command such as `system("ls")` is
-not flagged; a command built from a buffer or variable is.
+not flagged; a command built from a buffer or variable is. The argument-register
+convention is resolved per architecture (see
+[Architecture support](#architecture-support)), so this works on x86_64 and
+AArch64.
 
 ```bash
 $ blight --binary tests/fixtures/system-vuln --checks 78 --format json
@@ -131,7 +134,8 @@ Calls to the `printf` family (`printf`, `fprintf`, `syslog`, `snprintf`,
 `vprintf`, `vsprintf`, `vfprintf`, `vsyslog`) **where the format-string argument
 is not a constant string literal**. A literal format such as
 `printf("Hello %s\n", name)` is not flagged; a format built from a buffer or
-variable is.
+variable is. Like CWE-78, the format-argument register is resolved per
+architecture, so this works on x86_64 and AArch64.
 
 ### CWE-242 — Use of Inherently Dangerous Function
 
@@ -189,6 +193,27 @@ $ blight --binary path/to/elf --checks 676 --format json
 }
 ```
 
+## Architecture support
+
+`blight` supports **x86_64** and **AArch64 (arm64)** ELF binaries.
+
+The CWE-120, CWE-242, and CWE-676 detectors flag any call site to a dangerous
+symbol and are therefore architecture-agnostic — they work on every
+architecture radare2 can disassemble. The CWE-78 and CWE-134 detectors inspect
+the register that carries a specific argument (the command string, the format
+string), which depends on the calling convention:
+
+| Argument | x86_64 (SysV) | AArch64 (AAPCS64) |
+|---|---|---|
+| arg0 | `rdi` (`edi`/`di`) | `x0` (`w0`) |
+| arg1 | `rsi` (`esi`/`si`) | `x1` (`w1`) |
+| arg2 | `rdx` (`edx`/`dx`) | `x2` (`w2`) |
+
+The architecture is detected automatically from the binary via radare2's `iAj`
+and resolved through `blight.detectors._argregs`. Unknown or 32-bit-only
+architectures fall back to the conservative x86_64 convention. 32-bit ARM, MIPS,
+and PPC remain out of scope (see [POST_V01.md](POST_V01.md)).
+
 ## Tests
 
 The unit suite mocks the radare2 boundary and runs **without radare2
@@ -212,12 +237,12 @@ rebuild them.
 
 ## Scope (v0.1)
 
-In scope: ELF (x86_64), the CWE classes above, JSON output, pattern matching on
-disassembly.
+In scope: ELF (x86_64 and AArch64), the CWE classes above, JSON and SARIF
+output, pattern matching on disassembly.
 
-Not in scope (deferred): Ghidra integration, PE binaries, non-x86_64
-architectures (ARM/MIPS/PPC), symbolic execution / taint analysis, firmware
-analysis. Additional CWE classes are tracked in [POST_V01.md](POST_V01.md).
+Not in scope (deferred): Ghidra integration, PE binaries, 32-bit ARM / MIPS /
+PPC architectures, symbolic execution / taint analysis, firmware analysis.
+Additional CWE classes are tracked in [POST_V01.md](POST_V01.md).
 
 See [POST_V01.md](POST_V01.md) for the ranked backlog of post-v0.1 directions.
 

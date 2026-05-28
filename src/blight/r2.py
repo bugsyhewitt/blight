@@ -55,6 +55,8 @@ class R2Session(Protocol):
 
     def function_instructions(self, func_addr: int) -> list[Instruction]: ...
 
+    def arch(self) -> str: ...
+
 
 class Radare2Session:
     """Concrete :class:`R2Session` backed by a real radare2 process.
@@ -123,3 +125,21 @@ class Radare2Session:
                 )
             )
         return out
+
+    def arch(self) -> str:
+        """Return the binary's architecture as a normalized blight key.
+
+        Uses radare2's ``iAj`` (binary arch info) and collapses the reported
+        ``arch``/``bits`` to one of the keys blight's register tables use
+        (``x86_64``, ``arm64``). Unknown architectures fall back to the default
+        so detectors keep their conservative x86_64 behaviour.
+        """
+        from blight.detectors._argregs import DEFAULT_ARCH, normalize_arch
+
+        data = self._cmdj("iAj")
+        # iAj shape: {"bins": [{"arch": "...", "bits": N, ...}]}
+        bins = data.get("bins", []) if isinstance(data, dict) else []
+        if not bins:
+            return DEFAULT_ARCH
+        info = bins[0]
+        return normalize_arch(info.get("arch"), info.get("bits"))

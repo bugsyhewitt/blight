@@ -25,13 +25,18 @@ class FakeR2Session:
         imports: list[Import],
         xrefs: dict[int, list[Xref]] | None = None,
         functions: dict[int, list[Instruction]] | None = None,
+        arch: str = "x86_64",
     ) -> None:
         self._imports = imports
         self._xrefs = xrefs or {}
         self._functions = functions or {}
+        self._arch = arch
 
     def imports(self) -> list[Import]:
         return list(self._imports)
+
+    def arch(self) -> str:
+        return self._arch
 
     def xrefs_to(self, addr: int) -> list[Xref]:
         return list(self._xrefs.get(addr, []))
@@ -317,3 +322,100 @@ def cwe676_clean_session() -> FakeR2Session:
         Import(name="getrandom", plt=0x401070),
     ]
     return FakeR2Session(imports, xrefs={})
+
+
+# --- AArch64 (arm64) fixtures (POST_V01 item 5) ----------------------------
+#
+# On AArch64 the first integer/pointer argument lives in x0 (w0 for the 32-bit
+# view), the second in x1, the third in x2 — not rdi/rsi/rdx. These fixtures
+# exercise the architecture-aware register heuristic in cwe78/cwe134.
+
+def arm64_system_vuln_session() -> FakeR2Session:
+    """AArch64: system() with a non-constant command in x0 (stack-built)."""
+    imports = [Import(name="system", plt=0x710)]
+    xrefs = {0x710: [Xref(0x84c, "CALL", "run_cmd", "bl sym.imp.system")]}
+    # x0 is set from a stack address (not a str.*) => non-constant => flagged.
+    run_cmd_ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x120]!"),
+        Instruction(0x838, "add x1, sp, 0x10"),
+        Instruction(0x83c, "adrp x0, str.ls__s"),
+        Instruction(0x840, "add x0, x0, str.ls__s"),   # x0 = format literal for sprintf
+        Instruction(0x844, "bl sym.imp.sprintf"),
+        Instruction(0x848, "add x0, sp, 0x10"),         # x0 = stack buffer (non-const)
+        Instruction(0x84c, "bl sym.imp.system"),
+        Instruction(0x850, "ldp x29, x30, [sp], 0x120"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: run_cmd_ops}, arch="arm64")
+
+
+def arm64_system_constant_session() -> FakeR2Session:
+    """AArch64: system("ls") — constant x0, must NOT be flagged."""
+    imports = [Import(name="system", plt=0x710)]
+    xrefs = {0x710: [Xref(0x80c, "CALL", "main", "bl sym.imp.system")]}
+    main_ops = [
+        Instruction(0x800, "stp x29, x30, [sp, -0x10]!"),
+        Instruction(0x804, "adrp x0, str.ls"),
+        Instruction(0x808, "add x0, x0, str.ls"),   # x0 = "ls" literal
+        Instruction(0x80c, "bl sym.imp.system"),
+        Instruction(0x810, "ldp x29, x30, [sp], 0x10"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x800: main_ops}, arch="arm64")
+
+
+def arm64_printf_fmtstr_vuln_session() -> FakeR2Session:
+    """AArch64: printf() with a non-constant format string in x0 (stack-built)."""
+    imports = [Import(name="printf", plt=0x710)]
+    xrefs = {0x710: [Xref(0x848, "CALL", "log_msg", "bl sym.imp.printf")]}
+    log_msg_ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x90]!"),
+        Instruction(0x83c, "add x0, sp, 0x10"),     # x0 = stack buffer (non-const)
+        Instruction(0x848, "bl sym.imp.printf"),
+        Instruction(0x84c, "ldp x29, x30, [sp], 0x90"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: log_msg_ops}, arch="arm64")
+
+
+def arm64_printf_constant_session() -> FakeR2Session:
+    """AArch64: printf("Hello %s\\n", name) — constant x0, must NOT be flagged."""
+    imports = [Import(name="printf", plt=0x710)]
+    xrefs = {0x710: [Xref(0x814, "CALL", "main", "bl sym.imp.printf")]}
+    main_ops = [
+        Instruction(0x800, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x804, "add x1, sp, 0x10"),               # arg1: name
+        Instruction(0x808, "adrp x0, str.Hello__s_n"),
+        Instruction(0x80c, "add x0, x0, str.Hello__s_n"),     # x0 = format literal
+        Instruction(0x814, "bl sym.imp.printf"),
+        Instruction(0x818, "ldp x29, x30, [sp], 0x20"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x800: main_ops}, arch="arm64")
+
+
+def arm64_fprintf_fmtstr_vuln_session() -> FakeR2Session:
+    """AArch64: fprintf() with non-constant format in x1 (second arg)."""
+    imports = [Import(name="fprintf", plt=0x710)]
+    xrefs = {0x710: [Xref(0x84c, "CALL", "write_log", "bl sym.imp.fprintf")]}
+    # x0 = FILE*, x1 = format. x1 is loaded from the stack => non-constant.
+    write_log_ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x110]!"),
+        Instruction(0x83c, "ldr x0, [x29, 0x18]"),   # x0 = FILE* (not the format)
+        Instruction(0x844, "add x1, sp, 0x10"),       # x1 = stack buffer (non-const)
+        Instruction(0x84c, "bl sym.imp.fprintf"),
+        Instruction(0x850, "ldp x29, x30, [sp], 0x110"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: write_log_ops}, arch="arm64")
+
+
+def arm64_gets_vuln_session() -> FakeR2Session:
+    """AArch64: a single gets() call — CWE-242 is register-agnostic, so it must
+    flag on ARM exactly as on x86_64."""
+    imports = [Import(name="gets", plt=0x710)]
+    xrefs = {0x710: [Xref(0x820, "CALL", "main", "bl sym.imp.gets")]}
+    return FakeR2Session(imports, xrefs, arch="arm64")
+
+
+def arm64_strcpy_vuln_session() -> FakeR2Session:
+    """AArch64: a single strcpy() call — CWE-120 is register-agnostic and must
+    flag on ARM exactly as on x86_64."""
+    imports = [Import(name="strcpy", plt=0x710)]
+    xrefs = {0x710: [Xref(0x830, "CALL", "copy_it", "bl sym.imp.strcpy")]}
+    return FakeR2Session(imports, xrefs, arch="arm64")
