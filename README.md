@@ -43,13 +43,13 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {78,120,134,242,476,676,all}] [--format json] [--workers N]
+blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format json] [--workers N]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
-- `--checks` — which CWE check to run; one of `78`, `120`, `134`, `242`, `476`,
-  `676`, or `all` (default: `all`)
+- `--checks` — which CWE check to run; one of `78`, `120`, `134`, `242`, `252`,
+  `476`, `676`, or `all` (default: `all`)
 - `--format` — output format; `json` (default) or `sarif`
 - `--workers` — number of parallel worker threads for a directory scan
   (default: `1`, sequential). Ignored when `--binary` is a single file.
@@ -77,7 +77,7 @@ and `findings` list:
 ```json
 {
   "directory": "./firmware/bin",
-  "checks": [78, 120, 134, 242, 476, 676],
+  "checks": [78, 120, 134, 242, 252, 476, 676],
   "results": [
     { "binary": "./firmware/bin/httpd",  "findings": [ /* ... */ ] },
     { "binary": "./firmware/bin/telnetd", "findings": [ /* ... */ ] }
@@ -103,7 +103,7 @@ is, not how severe the bug would be if exploited:
 |---|---|---|
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-120, CWE-242, CWE-676 (HIGH-severity symbols) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-78, CWE-134, CWE-676 (MEDIUM-severity symbols) |
-| `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-676 (LOW-severity symbols) |
+| `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
@@ -113,7 +113,7 @@ emitted in `--format sarif` output under each result's `properties.confidence`.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-134, CWE-476, and CWE-676 were added post-v0.1 (see
+in v0.1; CWE-134, CWE-252, CWE-476, and CWE-676 were added post-v0.1 (see
 [POST_V01.md](POST_V01.md)).
 
 ### CWE-78 — OS Command Injection
@@ -235,6 +235,47 @@ $ blight --binary path/to/elf --checks 476 --format json
 }
 ```
 
+### CWE-252 — Unchecked Return Value
+
+Calls to security- or integrity-sensitive functions whose **return value is
+discarded without being checked**. The canonical bug: a program calls
+`setuid(0)` to drop privileges, the call fails, the non-zero return is ignored,
+and execution continues with elevated privileges. The same shape causes silent
+data loss for short `write`/`fwrite` and for `fclose`/`fflush`/`fsync` flush
+failures. The flagged set covers privilege/identity changes (`setuid`, `setgid`,
+`seteuid`, `setegid`, `setreuid`, `setregid`, `setresuid`, `setresgid`,
+`setgroups`), sandbox entry (`chroot`, `chdir`), and durable writes (`write`,
+`pwrite`, `fwrite`, `fclose`, `fflush`, `fsync`, `fdatasync`).
+
+This is the inverse of the CWE-476 check (a *discard* without a *check*, rather
+than a *use* without a *check*). The detector tracks the return register (`rax`
+on x86_64, `x0`/`w0` on AArch64) and scans forward from the call site: a
+`test`/`cmp` guard (x86_64) or `cbz`/`cbnz` (AArch64) on the return, or any read
+of it (saved to another register, stored, passed onward), means the value was
+checked and **suppresses** the finding. If the return register is overwritten by
+an unrelated value, clobbered by a following `call`, or the function ends before
+the value is ever read, the return was discarded and is flagged. The heuristic
+is intentionally conservative — no CFG reconstruction, no inter-procedural
+analysis — and every CWE-252 finding is therefore `low` confidence.
+
+```bash
+$ blight --binary path/to/elf --checks 252 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [252],
+  "findings": [
+    {
+      "cwe": 252,
+      "function": "drop_privs",
+      "address": "0x401150",
+      "evidence": "return value of setuid is ignored (unchecked return value — failure goes undetected)",
+      "symbol": "setuid",
+      "confidence": "low"
+    }
+  ]
+}
+```
+
 ### CWE-676 — Use of Potentially Dangerous Function
 
 Calls to libc functions that have a direct, safer replacement and no good
@@ -276,9 +317,10 @@ The CWE-120, CWE-242, and CWE-676 detectors flag any call site to a dangerous
 symbol and are therefore architecture-agnostic — they work on every
 architecture radare2 can disassemble. The CWE-78 and CWE-134 detectors inspect
 the register that carries a specific argument (the command string, the format
-string), and CWE-476 inspects the *return* register (`rax`/`x0`) plus the
-architecture's NULL-guard idioms; all three resolve the register convention
-per-architecture, so they work on x86_64 and AArch64:
+string), and CWE-476 and CWE-252 inspect the *return* register (`rax`/`x0`) plus
+the architecture's guard idioms (NULL-checks for CWE-476, return-value checks for
+CWE-252); all resolve the register convention per-architecture, so they work on
+x86_64 and AArch64:
 
 | Argument | x86_64 (SysV) | AArch64 (AAPCS64) |
 |---|---|---|

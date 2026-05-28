@@ -460,6 +460,124 @@ def arm64_malloc_checked_session() -> FakeR2Session:
     return FakeR2Session(imports, xrefs, {0x830: build_ops}, arch="arm64")
 
 
+# --- CWE-252 unchecked-return-value fixtures -------------------------------
+#
+# Pattern: a security-sensitive call (setuid/chroot/write/fclose/...) returns a
+# status in rax. Vulnerable cases discard it — the return register is clobbered
+# (overwritten / consumed by another call) or the function ends before the value
+# is ever read. Safe cases test/cmp/save the return value before discarding it.
+
+def setuid_unchecked_vuln_session() -> FakeR2Session:
+    """setuid() return value ignored: clobbered by `mov eax, 0` before any read."""
+    imports = [Import(name="setuid", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "drop_privs", "call sym.imp.setuid")]}
+    drop_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0"),
+        Instruction(0x401150, "call sym.imp.setuid"),
+        Instruction(0x401155, "mov eax, 0"),       # clobber rax, return discarded
+        Instruction(0x40115a, "leave"),
+        Instruction(0x40115b, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: drop_ops})
+
+
+def setuid_checked_session() -> FakeR2Session:
+    """setuid() return value tested before use (safe — must NOT flag)."""
+    imports = [Import(name="setuid", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "drop_privs", "call sym.imp.setuid")]}
+    drop_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0"),
+        Instruction(0x401150, "call sym.imp.setuid"),
+        Instruction(0x401155, "test eax, eax"),     # NULL/zero guard on return
+        Instruction(0x401158, "jne 0x401180"),
+        Instruction(0x40115e, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: drop_ops})
+
+
+def write_return_saved_session() -> FakeR2Session:
+    """write() return value moved into another register (used — must NOT flag)."""
+    imports = [Import(name="write", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x4011a0, "CALL", "dump", "call sym.imp.write")]}
+    dump_ops = [
+        Instruction(0x401180, "push rbp"),
+        Instruction(0x4011a0, "call sym.imp.write"),
+        Instruction(0x4011a5, "mov rbx, rax"),       # save return value → read
+        Instruction(0x4011a8, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401180: dump_ops})
+
+
+def fclose_unchecked_call_clobber_session() -> FakeR2Session:
+    """fclose() return discarded by an immediately following call (clobber)."""
+    imports = [
+        Import(name="fclose", plt=0x401040),
+        Import(name="puts", plt=0x401050),
+    ]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "finish", "call sym.imp.fclose")]}
+    finish_ops = [
+        Instruction(0x401150, "push rbp"),
+        Instruction(0x401160, "call sym.imp.fclose"),
+        Instruction(0x401165, "lea rdi, str.done"),  # next call clobbers rax
+        Instruction(0x40116c, "call sym.imp.puts"),
+        Instruction(0x401171, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401150: finish_ops})
+
+
+def chroot_unchecked_fallthrough_session() -> FakeR2Session:
+    """chroot() return ignored: function ends without reading rax (discarded)."""
+    imports = [Import(name="chroot", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "enter_jail", "call sym.imp.chroot")]}
+    jail_ops = [
+        Instruction(0x401150, "push rbp"),
+        Instruction(0x401160, "call sym.imp.chroot"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),                # return never inspected
+    ]
+    return FakeR2Session(imports, xrefs, {0x401150: jail_ops})
+
+
+def cwe252_clean_session() -> FakeR2Session:
+    """Only non-sensitive imports — nothing CWE-252 should flag."""
+    imports = [
+        Import(name="printf", plt=0x401040),
+        Import(name="malloc", plt=0x401050),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
+def arm64_setuid_unchecked_vuln_session() -> FakeR2Session:
+    """AArch64: setuid() return (w0) clobbered by `mov w0, 0` before any read."""
+    imports = [Import(name="setuid", plt=0x710)]
+    xrefs = {0x710: [Xref(0x83c, "CALL", "drop_privs", "bl sym.imp.setuid")]}
+    drop_ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x10]!"),
+        Instruction(0x838, "mov w0, 0"),
+        Instruction(0x83c, "bl sym.imp.setuid"),
+        Instruction(0x840, "mov w0, 0"),             # clobber, return discarded
+        Instruction(0x844, "ldp x29, x30, [sp], 0x10"),
+        Instruction(0x848, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: drop_ops}, arch="arm64")
+
+
+def arm64_setuid_checked_session() -> FakeR2Session:
+    """AArch64: setuid() return (w0) guarded with cbz before discard (safe)."""
+    imports = [Import(name="setuid", plt=0x710)]
+    xrefs = {0x710: [Xref(0x83c, "CALL", "drop_privs", "bl sym.imp.setuid")]}
+    drop_ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x10]!"),
+        Instruction(0x838, "mov w0, 0"),
+        Instruction(0x83c, "bl sym.imp.setuid"),
+        Instruction(0x840, "cbz w0, 0x860"),         # guard on the return
+        Instruction(0x844, "ldp x29, x30, [sp], 0x10"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: drop_ops}, arch="arm64")
+
+
 # --- AArch64 (arm64) fixtures (POST_V01 item 5) ----------------------------
 #
 # On AArch64 the first integer/pointer argument lives in x0 (w0 for the 32-bit

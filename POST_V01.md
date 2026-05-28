@@ -128,7 +128,7 @@ returns used without a `test`/`cmp` null guard in the same basic block.
 
 ---
 
-### 7. CWE-252 — Unchecked Return Value  ★★☆☆☆
+### 7. CWE-252 — Unchecked Return Value  ★★☆☆☆  ✅ SHIPPED
 **Complexity:** High (`detector-only` but needs control-flow analysis)  
 **Requires:** Function-level CFG from radare2 (`agj`); check whether return value register
 is tested after calls to security-sensitive functions.  
@@ -207,6 +207,27 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 ---
 
 ## Shipped
+
+- **CWE-252 — Unchecked Return Value** (Rank 7).
+  `src/blight/detectors/cwe252.py` flags call sites to security- and
+  integrity-sensitive functions whose return value is discarded without being
+  checked: privilege/identity changes (`setuid`/`setgid`/`seteuid`/`setegid`/
+  `setreuid`/`setregid`/`setresuid`/`setresgid`/`setgroups`), sandbox entry
+  (`chroot`/`chdir`), and durable writes (`write`/`pwrite`/`fwrite`/`fclose`/
+  `fflush`/`fsync`/`fdatasync`). It is the inverse of CWE-476: a single-function
+  forward linear scan tracks the return register (`rax`/`eax` on x86_64,
+  `x0`/`w0` on AArch64) from the call site. A read of the return — a `test`/`cmp`
+  guard, a `cbz`/`cbnz` (AArch64), a save into another register, a store, or use
+  as an outgoing argument — counts as "checked" and suppresses the finding. A
+  clobber (overwrite by an unrelated value, or a following `call` returning into
+  the same register) or reaching function end before any read means the return
+  was discarded and is flagged. No CFG reconstruction and no inter-procedural
+  analysis (the higher-effort CFG path noted in the original rank-7 design was
+  deliberately not taken — the conservative linear scan is sufficient for the
+  discard-vs-check distinction), so every finding is `low` confidence per the
+  rank-7 guidance. Architecture-aware on x86_64 and AArch64. Registered as check
+  `252`. See the `TestCwe252` block in `tests/test_detectors.py` and the CWE-252
+  fixtures in `tests/fake_session.py`.
 
 - **CWE-476 — NULL Pointer Dereference** (Rank 6).
   `src/blight/detectors/cwe476.py` flags the common pattern where a pointer
