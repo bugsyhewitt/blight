@@ -1,7 +1,12 @@
 """blight command-line interface.
 
 Usage:
-    blight --binary path/to/elf --checks all --format json
+    blight --binary path/to/elf  --checks all --format json
+    blight --binary path/to/dir/ --checks all --format json --workers 4
+
+``--binary`` accepts either a single ELF file or a directory. When given a
+directory, every regular file inside it (recursively) is treated as a binary to
+scan, and ``--workers N`` fans the scan out across a thread pool.
 """
 
 from __future__ import annotations
@@ -13,8 +18,8 @@ from pathlib import Path
 
 import blight
 from blight.detectors import DETECTORS
-from blight.engine import run_checks
 from blight.formatters.sarif import dump_sarif
+from blight.scan import ScanResult, scan_targets
 
 _ALL_CHECKS = sorted(DETECTORS)
 # Accepted --checks tokens: each cwe id as a string, plus "all".
@@ -33,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--binary",
         required=True,
         metavar="PATH",
-        help="path to the ELF binary to analyze",
+        help="path to an ELF binary, or a directory of binaries, to analyze",
     )
     parser.add_argument(
         "--checks",
@@ -47,6 +52,17 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["json", "sarif"],
         help="output format (default: json)",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "number of parallel worker threads for scanning a directory of "
+            "binaries (default: 1, sequential). Ignored when --binary is a "
+            "single file."
+        ),
+    )
     return parser
 
 
@@ -56,35 +72,83 @@ def _resolve_checks(token: str) -> list[int]:
     return [int(token)]
 
 
+def discover_binaries(directory: Path) -> list[Path]:
+    """Return the binaries to scan inside ``directory``.
+
+    Every regular file under ``directory`` (recursively) is a candidate, sorted
+    by path so output ordering is stable across runs and filesystems. blight
+    does not sniff file types here — radare2 will simply report no findings for
+    a non-ELF input — but symlinks and special files are skipped.
+    """
+    return sorted(p for p in directory.rglob("*") if p.is_file())
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    binary_path = Path(args.binary)
-    if not binary_path.is_file():
-        parser.error(f"binary not found: {binary_path}")
+    if args.workers < 1:
+        parser.error("--workers must be >= 1")
 
+    target = Path(args.binary)
     checks = _resolve_checks(args.checks)
 
-    # Imported here so the module imports without radare2/r2pipe present;
-    # the unit suite never reaches this line.
-    from blight.r2 import Radare2Session
+    if target.is_dir():
+        binaries = discover_binaries(target)
+        if not binaries:
+            parser.error(f"no files found under directory: {target}")
+        results = scan_targets(
+            [str(p) for p in binaries], checks, workers=args.workers
+        )
+        _emit_directory(target, checks, results, args.format)
+        return 0
 
-    with Radare2Session(str(binary_path)) as session:
-        findings = run_checks(session, checks)
+    if not target.is_file():
+        parser.error(f"binary not found: {target}")
 
-    if args.format == "sarif":
-        sys.stdout.write(dump_sarif(str(binary_path), findings, version=blight.__version__))
+    # Single-file scan. Honour the historical output shape exactly so existing
+    # consumers (and tests) are unaffected.
+    [result] = scan_targets([str(target)], checks, workers=1)
+    _emit_single(str(target), checks, result, args.format)
+    return 0
+
+
+def _emit_single(
+    binary: str, checks: list[int], result: ScanResult, fmt: str
+) -> None:
+    if fmt == "sarif":
+        sys.stdout.write(
+            dump_sarif(binary, result.findings, version=blight.__version__)
+        )
         sys.stdout.write("\n")
     else:
         output = {
-            "binary": str(binary_path),
+            "binary": binary,
             "checks": checks,
-            "findings": [f.to_dict() for f in findings],
+            "findings": [f.to_dict() for f in result.findings],
         }
         json.dump(output, sys.stdout, indent=2)
         sys.stdout.write("\n")
-    return 0
+
+
+def _emit_directory(
+    directory: Path, checks: list[int], results: list[ScanResult], fmt: str
+) -> None:
+    if fmt == "sarif":
+        # One SARIF run per binary keeps each result's artifactLocation correct.
+        all_findings = [f for r in results for f in r.findings]
+        sys.stdout.write(
+            dump_sarif(str(directory), all_findings, version=blight.__version__)
+        )
+        sys.stdout.write("\n")
+    else:
+        output = {
+            "directory": str(directory),
+            "checks": checks,
+            "results": [r.to_dict() for r in results],
+        }
+        json.dump(output, sys.stdout, indent=2)
+        sys.stdout.write("\n")
 
 
 if __name__ == "__main__":  # pragma: no cover
