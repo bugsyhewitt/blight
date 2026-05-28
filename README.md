@@ -43,7 +43,7 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format json] [--workers N] [--min-confidence {low,medium,high}]
+blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format json] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
@@ -59,6 +59,10 @@ blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format json]
 - `--min-confidence` — drop findings below this triage confidence before
   output; one of `low` (default, keeps everything), `medium`, or `high` (see
   **Filtering by confidence** below)
+- `--fail-on` — exit non-zero when any emitted finding is at or above this
+  triage confidence, turning blight into a CI build gate; one of `none`
+  (default, never fails), `low`, `medium`, or `high` (see **Failing a build on
+  findings** below)
 
 For a single binary, the output is a JSON object with the analyzed `binary`, the
 `checks` run, and a list of `findings`. Each finding carries `cwe`, `function`,
@@ -138,6 +142,39 @@ analyzed binary are untouched — and it is applied uniformly to single-file and
 directory scans and to both `json` and `sarif` output. The two flags compose:
 `--suppress` removes named false positives and `--min-confidence` then drops
 whatever remains below the threshold.
+
+### Failing a build on findings
+
+By default `blight` is advisory: it always exits `0`, so a pipeline must
+post-process the JSON to decide whether to fail. `--fail-on` turns blight into a
+build gate — if any **emitted** finding is at or above the chosen triage
+confidence, the process exits non-zero and the CI job fails without parsing the
+report. The threshold reuses the same `low < medium < high` ordering, with an
+extra `none` token that disables the gate:
+
+| `--fail-on` | Exits non-zero when |
+|---|---|
+| `none` (default) | never — fully backward compatible |
+| `low` | any finding at all is emitted |
+| `medium` | a `medium`- or `high`-confidence finding is emitted |
+| `high` | a `high`-confidence finding is emitted |
+
+```bash
+# Fail the CI job if any high-confidence finding survives:
+blight --binary ./firmware/bin --checks all --fail-on high
+echo "exit code: $?"   # 1 if a high-confidence finding was emitted, else 0
+```
+
+The gate runs **over the findings that are actually emitted** — i.e. after
+`--suppress` and `--min-confidence` have removed findings — so it is always
+consistent with the report you see. A suppressed or below-threshold finding
+cannot trip the gate. For a directory scan the gate considers every binary's
+surviving findings; one qualifying finding anywhere fails the whole run. The
+report is still written to stdout exactly as before; only the exit code changes.
+
+A scan that errored (e.g. an unreadable binary) carries no findings and never
+trips the gate on its own. The gate exit code is `1`; argparse usage errors stay
+`2`, so a CI job can tell "found vulnerabilities" apart from "bad invocation".
 
 ### Suppressing known false positives
 

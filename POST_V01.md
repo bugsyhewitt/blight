@@ -208,6 +208,32 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **`--fail-on` CI Exit-Code Gate** (post-backlog; completes the CI story
+  begun by Rank 4 confidence scoring and the `--min-confidence` filter).
+  `src/blight/exit_gate.py` adds a `--fail-on {none,low,medium,high}` CLI flag
+  that makes `blight` exit non-zero when any *emitted* finding is at or above
+  the chosen triage confidence, turning the tool into a build gate that fails
+  a pipeline without any post-processing of the JSON. The threshold reuses the
+  `low < medium < high` ordering (via `confidence_filter.meets_threshold`),
+  with an extra `none` token (the default) that disables the gate for full
+  backward compatibility — the historical "always exit 0" behaviour is
+  unchanged when the flag is omitted. Crucially the gate runs over the findings
+  that survive `--suppress` and `--min-confidence`, so it is always consistent
+  with the report the user sees: a suppressed or below-threshold finding cannot
+  trip the gate. For a directory scan it aggregates across every binary's
+  surviving findings (one qualifying finding anywhere fails the run); an
+  errored scan carries no findings and never trips on its own. The gate exit
+  code is `1`, distinct from argparse's usage-error code `2`, so CI can tell
+  "found vulnerabilities" apart from "bad invocation". This was chosen as the
+  next improvement because all eight ranked backlog items plus the
+  `--min-confidence` filter had shipped, the confidence labels were being
+  emitted but were not yet *actionable* as a build gate (a real adoption
+  blocker for CI pipelines), and it is a pure CLI/output-layer change requiring
+  no new detector heuristics or blocked external tooling — the remaining
+  high-yield CWE classes (CWE-190, CWE-416) still need symbolic execution /
+  heap modeling that is out of scope for blight's static approach. See
+  `tests/test_exit_gate.py`.
+
 - **`--min-confidence` Triage Threshold Filter** (post-backlog; pairs with
   Rank 4 confidence scoring). `src/blight/confidence_filter.py` adds a
   `--min-confidence {low,medium,high}` CLI flag that drops every finding below
