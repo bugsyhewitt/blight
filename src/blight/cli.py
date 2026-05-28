@@ -19,6 +19,11 @@ from pathlib import Path
 import blight
 from blight.confidence_filter import CONFIDENCE_CHOICES, filter_findings
 from blight.detectors import DETECTORS
+from blight.exit_gate import (
+    FAIL_ON_CHOICES,
+    GATE_TRIPPED_EXIT_CODE,
+    gate_trips,
+)
 from blight.formatters.sarif import dump_sarif
 from blight.scan import ScanResult, scan_targets
 from blight.suppressions import (
@@ -89,6 +94,19 @@ def build_parser() -> argparse.ArgumentParser:
             "medium and high; 'low' (default) keeps everything."
         ),
     )
+    parser.add_argument(
+        "--fail-on",
+        default="none",
+        choices=list(FAIL_ON_CHOICES),
+        help=(
+            "exit non-zero when any emitted finding is at or above this "
+            "triage confidence, turning blight into a CI build gate. "
+            "'high' fails only on a high-confidence finding; 'medium' fails "
+            "on medium or high; 'low' fails on any finding; 'none' (default) "
+            "never fails. The gate runs over findings that survive "
+            "--suppress and --min-confidence, so it matches the report."
+        ),
+    )
     return parser
 
 
@@ -138,7 +156,8 @@ def main(argv: list[str] | None = None) -> int:
             _apply_min_confidence(r, args.min_confidence) for r in results
         ]
         _emit_directory(target, checks, results, args.format)
-        return 0
+        emitted = [f for r in results for f in r.findings]
+        return _gate_exit_code(emitted, args.fail_on)
 
     if not target.is_file():
         parser.error(f"binary not found: {target}")
@@ -149,6 +168,19 @@ def main(argv: list[str] | None = None) -> int:
     result = _apply_suppressions(result, suppressions)
     result = _apply_min_confidence(result, args.min_confidence)
     _emit_single(str(target), checks, result, args.format)
+    return _gate_exit_code(result.findings, args.fail_on)
+
+
+def _gate_exit_code(emitted_findings, fail_on: str) -> int:
+    """Return the process exit code for the ``--fail-on`` gate.
+
+    The gate is evaluated over the findings that were actually emitted (after
+    suppression and the min-confidence threshold), so it is always consistent
+    with the report the user just saw. ``--fail-on none`` (the default) keeps
+    the historical ``0`` return for full backward compatibility.
+    """
+    if gate_trips(emitted_findings, fail_on):
+        return GATE_TRIPPED_EXIT_CODE
     return 0
 
 
