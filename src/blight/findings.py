@@ -2,17 +2,18 @@
 
 A Finding is a single detected CWE pattern in a binary. The JSON shape is the
 public contract (see README and v0.1 criteria): every finding carries
-``cwe``, ``function``, ``address``, and ``evidence``.
+``cwe``, ``function``, ``address``, ``evidence``, ``symbol``, and a triage
+``confidence`` label (``high`` / ``medium`` / ``low``).
 
 The internal representation delegates to
 :class:`binary_finding_schema.BinaryFinding` for validation and canonical
 serialization. The :class:`Finding` wrapper preserves the original attribute
-names and dict shape that the v0.1 tests and CLI depend on.
+names and dict shape that the tests and CLI depend on.
 """
 
 from __future__ import annotations
 
-from binary_finding_schema import BinaryFinding
+from binary_finding_schema import CONFIDENCE_LEVELS, BinaryFinding, Confidence
 
 
 class Finding:
@@ -27,6 +28,10 @@ class Finding:
         address: Hex string of the call-site address (e.g. "0x40114f").
         evidence: Human-readable explanation of why this was flagged.
         symbol: The dangerous library symbol involved (e.g. "strcpy").
+        confidence: Triage confidence label — ``"high"``, ``"medium"``, or
+            ``"low"``. Defaults to ``"medium"`` so detectors that do not set a
+            value remain valid; each detector picks a value from the
+            specificity of the evidence it gathered.
     """
 
     __slots__ = ("_inner",)
@@ -39,13 +44,19 @@ class Finding:
         address: str,
         evidence: str,
         symbol: str,
+        confidence: Confidence = "medium",
     ) -> None:
+        if confidence not in CONFIDENCE_LEVELS:
+            raise ValueError(
+                f"confidence must be one of {CONFIDENCE_LEVELS!r}, got: {confidence!r}"
+            )
         self._inner = BinaryFinding(
             cwe_id=f"CWE-{cwe}",
             function=function,
             address=address,
             evidence=evidence,
             symbol=symbol,
+            confidence=confidence,
         )
 
     # --- blight-native attribute access ----------------------------------
@@ -70,16 +81,24 @@ class Finding:
     def symbol(self) -> str:
         return self._inner.symbol  # type: ignore[return-value]
 
+    @property
+    def confidence(self) -> str:
+        return self._inner.confidence
+
     # --- serialization ---------------------------------------------------
 
     def to_dict(self) -> dict:
-        """Return the blight finding shape: {cwe, function, address, evidence, symbol}."""
+        """Return the blight finding shape.
+
+        Shape: ``{cwe, function, address, evidence, symbol, confidence}``.
+        """
         return {
             "cwe": self.cwe,
             "function": self.function,
             "address": self.address,
             "evidence": self.evidence,
             "symbol": self.symbol,
+            "confidence": self.confidence,
         }
 
     # --- equality / repr (used by engine sort and test assertions) -------
@@ -93,14 +112,24 @@ class Finding:
             and self.address == other.address
             and self.evidence == other.evidence
             and self.symbol == other.symbol
+            and self.confidence == other.confidence
         )
 
     def __hash__(self) -> int:
-        return hash((self.cwe, self.function, self.address, self.evidence, self.symbol))
+        return hash(
+            (
+                self.cwe,
+                self.function,
+                self.address,
+                self.evidence,
+                self.symbol,
+                self.confidence,
+            )
+        )
 
     def __repr__(self) -> str:  # pragma: no cover
         return (
             f"Finding(cwe={self.cwe!r}, function={self.function!r}, "
             f"address={self.address!r}, evidence={self.evidence!r}, "
-            f"symbol={self.symbol!r})"
+            f"symbol={self.symbol!r}, confidence={self.confidence!r})"
         )

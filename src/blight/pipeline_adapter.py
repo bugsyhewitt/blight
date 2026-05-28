@@ -63,4 +63,5 @@ def _to_binary_finding(finding: Finding) -> BinaryFinding:
         address=finding.address,
         evidence=finding.evidence,
         symbol=finding.symbol,
+        confidence=finding.confidence,
     )

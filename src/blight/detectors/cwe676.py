@@ -38,6 +38,15 @@ _DANGEROUS = {
 
 DANGEROUS = tuple(_DANGEROUS)
 
+# Map the per-symbol severity to a triage confidence label. The PLT match is
+# always certain (the symbol is the finding), so confidence here reflects how
+# strongly the call warrants action, mirroring the documented severity.
+_CONFIDENCE_FOR_SEVERITY = {
+    "HIGH": "high",
+    "MEDIUM": "medium",
+    "LOW": "low",
+}
+
 
 def detect(session) -> list[Finding]:
     findings: list[Finding] = []
@@ -50,6 +59,7 @@ def detect(session) -> list[Finding]:
                 address=hex(xref.from_addr),
                 evidence=f"[{severity}] call to {symbol}: {message}",
                 symbol=symbol,
+                confidence=_CONFIDENCE_FOR_SEVERITY[severity],
             )
         )
     return findings

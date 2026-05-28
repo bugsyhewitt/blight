@@ -53,7 +53,24 @@ blight --binary PATH [--checks {78,120,134,242,676,all}] [--format json]
 
 Output is a JSON object with the analyzed `binary`, the `checks` run, and a
 list of `findings`. Each finding carries `cwe`, `function`, `address`,
-`evidence`, and the dangerous `symbol`.
+`evidence`, the dangerous `symbol`, and a triage `confidence` label.
+
+### Confidence scoring
+
+Every finding carries a `confidence` label — one of `high`, `medium`, or
+`low` — so consumers can triage and filter without understanding each
+detector's heuristic internals. The label reflects how certain the detection
+is, not how severe the bug would be if exploited:
+
+| Confidence | Meaning | Applies to |
+|---|---|---|
+| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-120, CWE-242, CWE-676 (HIGH-severity symbols) |
+| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-78, CWE-134, CWE-676 (MEDIUM-severity symbols) |
+| `low` | The pattern is weakly indicative. | CWE-676 (LOW-severity symbols) |
+
+For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
+evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
+emitted in `--format sarif` output under each result's `properties.confidence`.
 
 ## Detected CWE classes
 
@@ -79,7 +96,8 @@ $ blight --binary tests/fixtures/system-vuln --checks 78 --format json
       "function": "run_cmd",
       "address": "0x40118f",
       "evidence": "call to system with a non-constant command argument (possible OS command injection)",
-      "symbol": "system"
+      "symbol": "system",
+      "confidence": "medium"
     }
   ]
 }
@@ -100,7 +118,8 @@ $ blight --binary tests/fixtures/strcpy-vuln --checks 120 --format json
       "function": "copy_it",
       "address": "0x401170",
       "evidence": "call to strcpy: strcpy copies without a destination size bound",
-      "symbol": "strcpy"
+      "symbol": "strcpy",
+      "confidence": "high"
     }
   ]
 }
@@ -130,7 +149,8 @@ $ blight --binary tests/fixtures/gets-vuln --checks 242 --format json
       "function": "main",
       "address": "0x401159",
       "evidence": "call to gets: gets cannot be used safely and was removed from C11",
-      "symbol": "gets"
+      "symbol": "gets",
+      "confidence": "high"
     }
   ]
 }
@@ -162,7 +182,8 @@ $ blight --binary path/to/elf --checks 676 --format json
       "function": "make_path",
       "address": "0x401160",
       "evidence": "[HIGH] call to tmpnam: Use of tmpnam() has race condition; use mkstemp()",
-      "symbol": "tmpnam"
+      "symbol": "tmpnam",
+      "confidence": "high"
     }
   ]
 }

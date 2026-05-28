@@ -69,5 +69,7 @@ def test_main_emits_json(monkeypatch, capsys) -> None:
     assert out["checks"] == [120]
     assert len(out["findings"]) == 3
     f = out["findings"][0]
-    assert set(f) == {"cwe", "function", "address", "evidence", "symbol"}
+    assert set(f) == {"cwe", "function", "address", "evidence", "symbol", "confidence"}
     assert f["cwe"] == 120
+    # CWE-120 findings are high confidence (the symbol IS the finding).
+    assert f["confidence"] == "high"
