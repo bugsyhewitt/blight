@@ -43,14 +43,15 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format json] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format {json,sarif,text}] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
 - `--checks` — which CWE check to run; one of `78`, `120`, `134`, `242`, `252`,
   `476`, `676`, or `all` (default: `all`)
-- `--format` — output format; `json` (default) or `sarif`
+- `--format` — output format; `json` (default), `sarif`, or `text` (a
+  human-readable console report, see **Human-readable text output** below)
 - `--workers` — number of parallel worker threads for a directory scan
   (default: `1`, sequential). Ignored when `--binary` is a single file.
 - `--suppress FILE` — path to a JSON suppression file listing known false
@@ -175,6 +176,65 @@ report is still written to stdout exactly as before; only the exit code changes.
 A scan that errored (e.g. an unreadable binary) carries no findings and never
 trips the gate on its own. The gate exit code is `1`; argparse usage errors stay
 `2`, so a CI job can tell "found vulnerabilities" apart from "bad invocation".
+
+### Human-readable text output
+
+`--format text` renders the findings as a compact, grouped-by-function console
+report instead of JSON or SARIF. It's for the interactive case — "I just
+scanned this binary, what's wrong with it?" — where piping the JSON through
+`jq` is friction. Findings are grouped under their containing function, each
+line shows the triage confidence, CWE, symbol, and address, and a per-CWE
+summary closes the report:
+
+```bash
+$ blight --binary tests/fixtures/strcpy-vuln --checks 120 --format text
+binary: tests/fixtures/strcpy-vuln
+checks: 120
+3 findings (high: 3, medium: 0, low: 0)
+
+function copy_it
+  [high] CWE-120 strcpy @ 0x401170
+    call to strcpy: strcpy copies without a destination size bound
+function format_it
+  [high] CWE-120 sprintf @ 0x4011aa
+    call to sprintf: sprintf writes a formatted string without a size bound
+function main
+  [high] CWE-120 gets @ 0x401202
+    call to gets: gets reads input without any size bound
+
+summary: CWE-120 x3
+```
+
+A clean binary prints `no findings` after the header. A directory scan prints
+one indented block per binary under a `directory:` header (errored binaries
+show their `error` string instead of findings), followed by a corpus total:
+
+```bash
+$ blight --binary ./firmware/bin --checks all --format text
+directory: ./firmware/bin
+checks: 78, 120, 134, 242, 252, 476, 676
+
+  binary: ./firmware/bin/httpd
+  1 finding (high: 1, medium: 0, low: 0)
+
+  function handle_request
+    [high] CWE-120 strcpy @ 0x401abc
+      call to strcpy: strcpy copies without a destination size bound
+
+  summary: CWE-120 x1
+
+  binary: ./firmware/bin/telnetd
+  no findings
+
+total: 1 finding across 2 binaries
+```
+
+Like `json` and `sarif`, the text report covers exactly the findings that
+survive `--suppress` and `--min-confidence`, and `--fail-on` evaluates the same
+set — so the exit code always matches the report you see. **The text format is
+a report for humans and carries no stability contract**: its layout may change
+between releases. For tooling, scripting, or CI parsing, keep using
+`--format json` or `--format sarif`.
 
 ### Suppressing known false positives
 
@@ -465,8 +525,8 @@ rebuild them.
 
 ## Scope (v0.1)
 
-In scope: ELF (x86_64 and AArch64), the CWE classes above, JSON and SARIF
-output, pattern matching on disassembly.
+In scope: ELF (x86_64 and AArch64), the CWE classes above, JSON, SARIF, and
+human-readable text output, pattern matching on disassembly.
 
 Not in scope (deferred): Ghidra integration, PE binaries, 32-bit ARM / MIPS /
 PPC architectures, symbolic execution / taint analysis, firmware analysis.

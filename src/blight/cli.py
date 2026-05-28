@@ -25,6 +25,7 @@ from blight.exit_gate import (
     gate_trips,
 )
 from blight.formatters.sarif import dump_sarif
+from blight.formatters.text import dump_text_directory, dump_text_single
 from blight.scan import ScanResult, scan_targets
 from blight.suppressions import (
     SuppressionError,
@@ -60,8 +61,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--format",
         default="json",
-        choices=["json", "sarif"],
-        help="output format (default: json)",
+        choices=["json", "sarif", "text"],
+        help=(
+            "output format: 'json' (default, machine-readable), 'sarif' "
+            "(GitHub Code Scanning), or 'text' (human-readable console "
+            "report). 'text' carries no stability contract — use 'json' or "
+            "'sarif' for tooling."
+        ),
     )
     parser.add_argument(
         "--workers",
@@ -225,6 +231,9 @@ def _emit_single(
             dump_sarif(binary, result.findings, version=blight.__version__)
         )
         sys.stdout.write("\n")
+    elif fmt == "text":
+        sys.stdout.write(dump_text_single(binary, checks, result.findings))
+        sys.stdout.write("\n")
     else:
         output = {
             "binary": binary,
@@ -244,6 +253,9 @@ def _emit_directory(
         sys.stdout.write(
             dump_sarif(str(directory), all_findings, version=blight.__version__)
         )
+        sys.stdout.write("\n")
+    elif fmt == "text":
+        sys.stdout.write(dump_text_directory(str(directory), checks, results))
         sys.stdout.write("\n")
     else:
         output = {
