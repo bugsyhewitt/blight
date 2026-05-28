@@ -53,6 +53,9 @@ blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format json]
 - `--format` — output format; `json` (default) or `sarif`
 - `--workers` — number of parallel worker threads for a directory scan
   (default: `1`, sequential). Ignored when `--binary` is a single file.
+- `--suppress FILE` — path to a JSON suppression file listing known false
+  positives to drop from the output (see **Suppressing known false positives**
+  below)
 
 For a single binary, the output is a JSON object with the analyzed `binary`, the
 `checks` run, and a list of `findings`. Each finding carries `cwe`, `function`,
@@ -108,6 +111,48 @@ is, not how severe the bug would be if exploited:
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
 emitted in `--format sarif` output under each result's `properties.confidence`.
+
+### Suppressing known false positives
+
+Every static-analysis tool accumulates known false positives over time.
+`--suppress FILE` lets a team codify accepted risk in a small JSON file; any
+matching finding is dropped from the output before it is emitted. The binary is
+never modified and the detectors are untouched — suppression is a pure
+output-layer filter applied to both single-file and directory scans (and to
+both `json` and `sarif` output).
+
+```bash
+blight --binary ./firmware/bin --checks all --suppress blight-suppress.json
+```
+
+The file is JSON (no extra toolchain — blight stays pure-Python). Each rule
+**must** carry a `cwe`; it may add any of `function`, `address`, and `symbol`
+as extra constraints. All present constraints must match for a finding to be
+suppressed (logical **AND**); omitted fields act as wildcards. An optional
+`reason` key (and any `"//"` comment key) is documentation only and is ignored
+when matching.
+
+```json
+{
+  "//": "Accepted risks, reviewed 2025-05. Owner: appsec.",
+  "suppressions": [
+    { "cwe": 120, "symbol": "strcpy", "function": "copy_it",
+      "reason": "bounded by caller; audited in TICKET-481" },
+    { "cwe": 78, "address": "0x40119c", "reason": "constant argv, not attacker-controlled" },
+    { "cwe": 676 }
+  ]
+}
+```
+
+- `{ "cwe": 120 }` suppresses **every** CWE-120 finding.
+- Adding `symbol`/`function`/`address` narrows the rule — e.g. the first rule
+  above suppresses only the `strcpy` call site inside `copy_it`.
+- `address` matching is case-insensitive and tolerant of a missing `0x` prefix.
+- `cwe` may be written as an integer (`120`), a numeric string (`"120"`), or a
+  prefixed string (`"CWE-120"`).
+
+A malformed suppression file (bad JSON, missing `cwe`, unknown key, wrong type)
+is reported as a clear CLI error and aborts the run before any scanning happens.
 
 ## Detected CWE classes
 

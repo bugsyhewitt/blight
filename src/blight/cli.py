@@ -20,6 +20,11 @@ import blight
 from blight.detectors import DETECTORS
 from blight.formatters.sarif import dump_sarif
 from blight.scan import ScanResult, scan_targets
+from blight.suppressions import (
+    SuppressionError,
+    SuppressionSet,
+    load_suppressions,
+)
 
 _ALL_CHECKS = sorted(DETECTORS)
 # Accepted --checks tokens: each cwe id as a string, plus "all".
@@ -63,6 +68,16 @@ def build_parser() -> argparse.ArgumentParser:
             "single file."
         ),
     )
+    parser.add_argument(
+        "--suppress",
+        metavar="FILE",
+        default=None,
+        help=(
+            "path to a JSON suppression file listing known false positives to "
+            "drop from the output. Each rule keys on 'cwe' plus any of "
+            "'function', 'address', 'symbol'."
+        ),
+    )
     return parser
 
 
@@ -90,6 +105,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.workers < 1:
         parser.error("--workers must be >= 1")
 
+    suppressions = SuppressionSet(rules=())
+    if args.suppress is not None:
+        try:
+            suppressions = load_suppressions(args.suppress)
+        except SuppressionError as exc:
+            parser.error(f"--suppress: {exc}")
+
     target = Path(args.binary)
     checks = _resolve_checks(args.checks)
 
@@ -100,6 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         results = scan_targets(
             [str(p) for p in binaries], checks, workers=args.workers
         )
+        results = [_apply_suppressions(r, suppressions) for r in results]
         _emit_directory(target, checks, results, args.format)
         return 0
 
@@ -109,8 +132,26 @@ def main(argv: list[str] | None = None) -> int:
     # Single-file scan. Honour the historical output shape exactly so existing
     # consumers (and tests) are unaffected.
     [result] = scan_targets([str(target)], checks, workers=1)
+    result = _apply_suppressions(result, suppressions)
     _emit_single(str(target), checks, result, args.format)
     return 0
+
+
+def _apply_suppressions(
+    result: ScanResult, suppressions: SuppressionSet
+) -> ScanResult:
+    """Return ``result`` with suppressed findings removed.
+
+    A result that errored carries no findings, so suppression is a no-op there;
+    the ``error`` field is preserved untouched.
+    """
+    if not suppressions:
+        return result
+    return ScanResult(
+        binary=result.binary,
+        findings=suppressions.apply(result.findings),
+        error=result.error,
+    )
 
 
 def _emit_single(
