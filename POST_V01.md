@@ -198,7 +198,11 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 - CWE-134 dropped off Top 25 but has very active CVE flow in embedded firmware (2025).
 - CWE-190 (integer overflow) dropped off Top 25 and requires symbolic execution for
   precise detection — deprioritized accordingly.
-- CWE-416 (use-after-free) requires heap modeling — out of scope for static PLT analysis.
+- CWE-416 (use-after-free): full heap-lifetime modeling is out of scope for
+  static analysis, but a conservative *triage* detector now ships — it flags a
+  pointer that is freed and then reused (dereferenced or passed onward) in the
+  same function with no intervening reassignment, the same single-function
+  alias-tracking shape as CWE-476 / CWE-252 (see Shipped: CWE-416).
 
 **radare2 / r2pipe status (2025):**
 - r2pipe 1.9.6 (June 2025), radare2 6.1.2 active development.
@@ -209,6 +213,36 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 ---
 
 ## Shipped
+
+- **CWE-416 — Use After Free** (post-backlog; the third single-function
+  taint-propagation detector, after CWE-476 and CWE-252).
+  `src/blight/detectors/cwe416.py` flags the most common statically-detectable
+  use-after-free: a pointer passed to `free`/`cfree` (the dangling-pointer
+  source, carried in the first-argument register — `rdi` on x86_64, `x0` on
+  AArch64) that is then **reused before being reassigned**. The detector seeds
+  the alias set with the first-argument register at the `free` call site and
+  scans forward in the same function: a reassignment of a live alias
+  (`mov rdi, 0` / `xor rdi, rdi` / `mov x0, 0`, a `lea` of a fresh address, or a
+  reload from an unrelated source) kills the dangling alias — the canonical
+  `ptr = NULL;` after `free(ptr)` — and suppresses the finding; a dereference
+  (`[reg …]` memory operand naming a live alias) or the freed pointer passed
+  onward to a following `call`/`bl` is flagged; a register-to-register move
+  propagates the alias so a deref via the copy is still caught. This reuses the
+  existing register-alias machinery (mirroring CWE-476): no CFG reconstruction,
+  no inter-procedural analysis, no heap-state modeling. `realloc` is
+  deliberately **not** tracked — its old pointer is only dangling on the failure
+  path and the live pointer is its *return* value, which this argument-tracking
+  pass cannot disambiguate without false positives. Architecture-aware on
+  x86_64 and AArch64 (POST_V01 item 5), resolved through the shared
+  `_argregs.arg_register_aliases` table. Because the reachability of the use
+  along the freed path is not proven statically, every CWE-416 finding is `low`
+  confidence, matching CWE-476 / CWE-252 policy. Registered as check `416`, so
+  the `--checks {…,416,all}` token and the `all` set wire in automatically
+  through the `DETECTORS` dispatch dict; SARIF maps CWE-416 to level `error`.
+  10 new unit tests (`tests/test_detectors.py::TestCwe416`) covering deref,
+  alias-propagated deref, pass-to-call, the `ptr=NULL`/`xor`/`lea`-reload safe
+  cases, the never-reused safe case, the no-`free`-import / clean-baseline
+  negatives, and the AArch64 vuln + safe pair. Unit test count 335 → 345.
 
 - **CWE-798 — Use of Hard-coded Credentials** (post-backlog; the first
   *data-driven* detector — it scans string literals, not the call graph).

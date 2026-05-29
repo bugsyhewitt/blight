@@ -43,14 +43,14 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {22,78,89,119,120,134,242,252,295,327,362,369,426,476,676,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {22,78,89,119,120,134,242,252,295,327,362,369,416,426,476,676,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
 - `--checks` — which CWE check to run; one of `22`, `78`, `89`, `119`, `120`,
-  `134`, `242`, `252`, `295`, `327`, `362`, `369`, `426`, `476`, `676`, `798`,
-  or `all` (default: `all`)
+  `134`, `242`, `252`, `295`, `327`, `362`, `369`, `416`, `426`, `476`, `676`,
+  `798`, or `all` (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
 - `--output-file FILE` (`-o FILE`) — write the report to `FILE` instead of
@@ -136,7 +136,7 @@ is, not how severe the bug would be if exploited:
 |---|---|---|
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
-| `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-676 (LOW-severity symbols) |
+| `low` | The pattern is weakly indicative. | CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
@@ -305,8 +305,8 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
 in v0.1; CWE-22, CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-362,
-CWE-369, CWE-426, CWE-476, CWE-676, and CWE-798 were added post-v0.1 (see
-[POST_V01.md](POST_V01.md)).
+CWE-369, CWE-416, CWE-426, CWE-476, CWE-676, and CWE-798 were added post-v0.1
+(see [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
 
@@ -707,6 +707,63 @@ function is reported by its entry address (radare2's `aflj` carries the offset,
 not a resolved name, for this anchorless check). The detector is architecture-
 aware on x86_64 and AArch64.
 
+### CWE-416 — Use After Free
+
+A pointer is passed to `free` (the dangling-pointer source) and the **same
+pointer is then used again — dereferenced or passed onward — without first being
+reassigned** (set to `NULL`, zeroed, or reloaded with a fresh value). Touching
+storage after it has been released is the classic use-after-free: the freed chunk
+may have been recycled into a different allocation, so the stale pointer now reads
+or writes another object's memory.
+
+Like [CWE-476](#cwe-476--null-pointer-dereference) and
+[CWE-252](#cwe-252--unchecked-return-value) this is a single-function
+taint-propagation check. The *source* is the freed pointer, which lives in the
+first-argument register (`rdi` on x86_64, `x0` on AArch64) at the `free` call
+site; the *sink* is any later read of that register; the *sanitizer* is a
+reassignment that severs the dangling alias. The detector seeds the alias set
+with the first-argument register, then scans forward from the call:
+
+- a **reassignment** of a live alias — `mov rdi, 0` / `xor rdi, rdi` (x86_64),
+  `mov x0, 0` (AArch64), a `lea` of a fresh address, or a reload from an
+  unrelated source — kills the dangling alias (the canonical `ptr = NULL;` after
+  `free(ptr)`) and **suppresses** the finding;
+- a **dereference** of a live alias (a `[reg …]` memory operand naming the freed
+  register) reached before any reassignment is flagged;
+- the freed pointer **passed onward** — moved into an argument register or still
+  live in the first-argument register at a following `call`/`bl` — is flagged;
+- a register-to-register move (`mov rbx, rdi`) **propagates** the dangling alias
+  so a deref via `rbx` is still caught.
+
+Only the unambiguous deallocators `free`/`cfree` are tracked. `realloc` is
+deliberately excluded: its *return value* (not its argument) is the live pointer
+and the old pointer is only dangling on the failure path, which this single-pass
+heuristic cannot disambiguate without raising false positives.
+
+```bash
+$ blight --binary path/to/elf --checks 416 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [416],
+  "findings": [
+    {
+      "cwe": 416,
+      "function": "use_after",
+      "address": "0x401150",
+      "evidence": "pointer freed by free is used again without being reassigned (possible use-after-free of a dangling pointer)",
+      "symbol": "free",
+      "confidence": "low"
+    }
+  ]
+}
+```
+
+Because the reachability of the use along the freed path is not proven
+statically (an intervening branch this linear scan cannot see may reassign the
+pointer), and because compilers reuse the argument register freely, every
+CWE-416 finding is `low` confidence. The detector is architecture-aware on
+x86_64 and AArch64.
+
 ### CWE-426 — Untrusted Search Path
 
 Calls to routines that resolve a **program** or a **shared object** by walking
@@ -927,10 +984,12 @@ CWE-426, and CWE-676 detectors flag any call site to a dangerous symbol and are 
 — they work on every architecture radare2 can disassemble. CWE-798 is likewise
 architecture-agnostic (it scans string data, not the call graph). The CWE-78 and CWE-134 detectors inspect
 the register that carries a specific argument (the command string, the format
-string), and CWE-476 and CWE-252 inspect the *return* register (`rax`/`x0`) plus
+string), CWE-476 and CWE-252 inspect the *return* register (`rax`/`x0`) plus
 the architecture's guard idioms (NULL-checks for CWE-476, return-value checks for
-CWE-252); all resolve the register convention per-architecture, so they work on
-x86_64 and AArch64:
+CWE-252), and CWE-416 tracks the *first-argument* register (`rdi`/`x0`) carrying
+the freed pointer plus the per-architecture reassignment idioms (`mov rdi, 0` /
+`xor` / `mov x0, 0`); all resolve the register convention per-architecture, so
+they work on x86_64 and AArch64:
 
 | Argument | x86_64 (SysV) | AArch64 (AAPCS64) |
 |---|---|---|
