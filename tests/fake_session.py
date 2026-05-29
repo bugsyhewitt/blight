@@ -1176,6 +1176,193 @@ def cwe369_clean_session() -> FakeR2Session:
     return FakeR2Session(imports=[], functions={})
 
 
+# --- CWE-191 integer-underflow fixtures ------------------------------------
+#
+# PLT-anchored, single-function BACKWARD scan: a size argument to an
+# allocator/copy (malloc arg0 = rdi/x0; memcpy length arg2 = rdx/x2) that is
+# produced by an unguarded unsigned subtraction is the underflow signal. These
+# carry both imports/xrefs (to find the sink) and the function disassembly.
+
+def cwe191_malloc_sub_vuln_session() -> FakeR2Session:
+    """x86_64: malloc(len - header) with no bounds check (vulnerable).
+
+    eax = len; eax = eax - esi (header); edi = eax; call malloc — the size in
+    edi/rdi is an unguarded subtraction result that wraps when len < header.
+    """
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "alloc_body", "call sym.imp.malloc")]}
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov eax, dword [rbp - 0x4]"),   # eax = len
+        Instruction(0x401148, "mov esi, dword [rbp - 0x8]"),   # esi = header
+        Instruction(0x40114c, "sub eax, esi"),                 # eax = len - header
+        Instruction(0x40114f, "mov edi, eax"),                 # size arg (rdi)
+        Instruction(0x401160, "call sym.imp.malloc"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe191_memcpy_sub_len_vuln_session() -> FakeR2Session:
+    """x86_64: memcpy(dst, src, end - start) — length (rdx) is an unguarded sub."""
+    imports = [Import(name="memcpy", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401210, "CALL", "copy_range", "call sym.imp.memcpy")]}
+    ops = [
+        Instruction(0x401200, "push rbp"),
+        Instruction(0x401204, "mov rdx, qword [rbp - 0x10]"),  # rdx = end
+        Instruction(0x401208, "sub rdx, rsi"),                 # rdx = end - start
+        Instruction(0x40120c, "lea rdi, [rbp - 0x80]"),        # dst
+        Instruction(0x401210, "call sym.imp.memcpy"),
+        Instruction(0x401215, "leave"),
+        Instruction(0x401216, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401200: ops})
+
+
+def cwe191_sub_guarded_session() -> FakeR2Session:
+    """x86_64: the operands are compared (cmp + jb) before the sub → safe."""
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "alloc_body", "call sym.imp.malloc")]}
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov eax, dword [rbp - 0x4]"),   # eax = len
+        Instruction(0x401144, "mov esi, dword [rbp - 0x8]"),   # esi = header
+        Instruction(0x401148, "cmp eax, esi"),                 # bounds check
+        Instruction(0x40114a, "jb 0x401180"),                  # if len < header skip
+        Instruction(0x40114c, "sub eax, esi"),                 # guarded subtraction
+        Instruction(0x40114f, "mov edi, eax"),
+        Instruction(0x401160, "call sym.imp.malloc"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe191_malloc_constant_size_session() -> FakeR2Session:
+    """x86_64: malloc(0x40) — constant size, no subtraction (safe)."""
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "alloc_fixed", "call sym.imp.malloc")]}
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "mov edi, 0x40"),                # constant size
+        Instruction(0x401160, "call sym.imp.malloc"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe191_aliased_sub_vuln_session() -> FakeR2Session:
+    """x86_64: size reaches malloc through a register alias of a subtraction.
+
+    rbx = rax - rcx; rdi = rbx; call malloc — the size in rdi traces back
+    through rbx to an unguarded subtraction.
+    """
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "alloc_alias", "call sym.imp.malloc")]}
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov rax, qword [rbp - 0x8]"),   # rax = total
+        Instruction(0x401144, "mov rcx, qword [rbp - 0x10]"),  # rcx = used
+        Instruction(0x401148, "sub rax, rcx"),                 # rax = total - used
+        Instruction(0x40114b, "mov rbx, rax"),                 # alias the result
+        Instruction(0x40114e, "mov rdi, rbx"),                 # size arg
+        Instruction(0x401160, "call sym.imp.malloc"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe191_size_reloaded_safe_session() -> FakeR2Session:
+    """x86_64: a sub exists, but the size is reloaded from memory afterward.
+
+    The value reaching malloc is the fresh reload, NOT the subtraction → safe.
+    """
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "alloc_reload", "call sym.imp.malloc")]}
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov eax, dword [rbp - 0x4]"),
+        Instruction(0x401144, "sub eax, esi"),                 # unrelated earlier sub
+        Instruction(0x401148, "mov edi, dword [rbp - 0x20]"),  # size := fresh reload
+        Instruction(0x401160, "call sym.imp.malloc"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe191_no_size_sinks_session() -> FakeR2Session:
+    """No size-consuming sink imported — nothing for CWE-191 to anchor on."""
+    imports = [
+        Import(name="puts", plt=0x401030),
+        Import(name="strlen", plt=0x401040),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
+def cwe191_arm64_malloc_sub_vuln_session() -> FakeR2Session:
+    """AArch64: malloc(len - header) — size in x0 from an unguarded sub."""
+    imports = [Import(name="malloc", plt=0x710)]
+    xrefs = {0x710: [Xref(0x840, "CALL", "alloc_body", "bl sym.imp.malloc")]}
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x834, "ldr w1, [x29, 0x8]"),              # w1 = len
+        Instruction(0x838, "ldr w2, [x29, 0xc]"),              # w2 = header
+        Instruction(0x83c, "sub w0, w1, w2"),                  # w0 = len - header
+        Instruction(0x840, "bl sym.imp.malloc"),
+        Instruction(0x844, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x848, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe191_arm64_sub_guarded_session() -> FakeR2Session:
+    """AArch64: `cmp w1, w2; b.lo ...` guards the sub before malloc (safe)."""
+    imports = [Import(name="malloc", plt=0x710)]
+    xrefs = {0x710: [Xref(0x848, "CALL", "alloc_body", "bl sym.imp.malloc")]}
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x834, "ldr w1, [x29, 0x8]"),
+        Instruction(0x838, "ldr w2, [x29, 0xc]"),
+        Instruction(0x83c, "cmp w1, w2"),                      # bounds check
+        Instruction(0x840, "b.lo 0x880"),                      # if len < header skip
+        Instruction(0x844, "sub w0, w1, w2"),                  # guarded subtraction
+        Instruction(0x848, "bl sym.imp.malloc"),
+        Instruction(0x84c, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x850, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe191_multi_call_session() -> FakeR2Session:
+    """Two malloc sites in two functions: one sub-sized (flag), one constant."""
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {
+        0x401040: [
+            Xref(0x40113A, "CALL", "vuln_alloc", "call sym.imp.malloc"),
+            Xref(0x401234, "CALL", "fixed_alloc", "call sym.imp.malloc"),
+        ]
+    }
+    vuln_ops = [
+        Instruction(0x401130, "mov eax, dword [rbp - 0x4]"),
+        Instruction(0x401134, "sub eax, esi"),                 # unguarded sub
+        Instruction(0x401137, "mov edi, eax"),
+        Instruction(0x40113A, "call sym.imp.malloc"),          # → flag
+        Instruction(0x40113F, "ret"),
+    ]
+    fixed_ops = [
+        Instruction(0x401230, "mov edi, 0x20"),                # constant size
+        Instruction(0x401234, "call sym.imp.malloc"),          # → skip
+        Instruction(0x401239, "ret"),
+    ]
+    return FakeR2Session(
+        imports, xrefs, {0x401130: vuln_ops, 0x401230: fixed_ops}
+    )
+
+
 # --- AArch64 (arm64) fixtures (POST_V01 item 5) ----------------------------
 #
 # On AArch64 the first integer/pointer argument lives in x0 (w0 for the 32-bit
