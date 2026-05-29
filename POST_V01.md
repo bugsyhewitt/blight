@@ -214,6 +214,55 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **CWE-401 — Missing Release of Memory after Effective Lifetime** (memory
+  leak; the *inverse-sink* sibling of the heap-lifetime detectors, built on the
+  single-function alias-tracking machinery shared by CWE-122 / CWE-415 /
+  CWE-416). `src/blight/detectors/cwe401.py` flags the statically-detectable
+  leak: a heap buffer obtained from an allocator (`malloc` / `calloc` /
+  `realloc` / `reallocarray` / `strdup` / `strndup` / `aligned_alloc` / `valloc`
+  / `pvalloc` / `memalign`) whose **only register alias is then overwritten with
+  an unrelated value** before it is ever freed, stored to memory, returned, or
+  passed to another call. Once the sole handle to a freshly-allocated buffer is
+  clobbered with no surviving copy, the program can never `free` it — the memory
+  leaks. **Chosen over CWE-457** (uninitialized variable use): POST_V01 records
+  (see the CWE-122 entry below) that a precise CWE-457 detector needs def-use
+  dataflow over stack slots across basic blocks — the CFG/value-flow modeling
+  repeatedly recorded as out of scope — whereas a leak reduces to the *same*
+  in-function forward-scan-with-register-alias-tracking shape already proven by
+  CWE-122/CWE-415/CWE-416, so it lands as a small, infrastructure-free PR. The
+  detector seeds the alias set with the allocator **return** register (`rax` on
+  x86_64, `x0` on AArch64) and scans forward: a register-to-register move
+  propagates the alias (so the handle surviving in a copy is not a leak); a
+  **store to memory** (`mov [rbp-8], rax`) lets the pointer escape our
+  in-function view and is conservatively presumed managed (not flagged); a
+  **free** of a live alias releases the buffer (not flagged); the pointer left
+  in / moved to the **return register** at `ret` is a caller handoff (not
+  flagged); a pass to **any other call** leaves ownership ambiguous (not
+  flagged); and overwriting the **last** live alias with an unrelated value — a
+  memory reload, a fresh `lea` address, an immediate, an `xor reg,reg`, or an
+  unrelated register — with no surviving copy and no preceding
+  free/escape/return/handoff is the leak. This conservative bias (suppress on
+  escape/free/return/handoff) keeps false positives low, which is the dominant
+  risk for a leak detector — at the cost of missing leaks that escape our
+  register view. Deliberately distinct from CWE-415/CWE-416 (whose sinks are a
+  *second free* / a *use of a freed pointer*) — here nothing is freed at all,
+  which is the whole point. `realloc` / `reallocarray` are included as
+  allocators because their *return* value is the live (possibly moved) heap
+  buffer that must be freed, exactly as in CWE-122. Architecture-aware on x86_64
+  and AArch64 (POST_V01 item 5), resolved through the shared
+  `_argregs.arg_register_aliases` table. Because reachability of the clobber
+  along the allocated path is not proven statically, every CWE-401 finding is
+  `low` confidence, matching CWE-122 / CWE-415 / CWE-416 / CWE-476 policy.
+  Registered as check `401`, so the `--checks {…,401,all}` token and the `all`
+  set wire in automatically through the `DETECTORS` dispatch dict; SARIF maps
+  CWE-401 to level `error`. 10 new unit tests
+  (`tests/test_detectors.py::TestCwe401`) covering the direct clobbered-unfreed
+  leak, the alias-propagated leak, the freed / stored-escape / returned /
+  passed-to-call safe cases, the no-allocator-import / clean-baseline negatives,
+  and the AArch64 leak + freed-safe pair; the `--checks all` (`test_cli`) and
+  SARIF level-mapping (`test_sarif`) assertions were updated to include `401`.
+  Unit test count 367 → 378.
+
 - **CWE-122 — Heap-Based Buffer Overflow** (post-backlog; the heap-specific
   refinement of CWE-120, built on the single-function alias-tracking machinery
   shared by CWE-416 / CWE-415 / CWE-476).

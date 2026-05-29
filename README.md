@@ -43,14 +43,14 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {22,78,89,119,120,134,242,252,295,327,362,369,416,426,476,676,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {22,78,89,119,120,122,134,242,252,295,327,362,369,401,415,416,426,476,676,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
 - `--checks` — which CWE check to run; one of `22`, `78`, `89`, `119`, `120`,
-  `134`, `242`, `252`, `295`, `327`, `362`, `369`, `416`, `426`, `476`, `676`,
-  `798`, or `all` (default: `all`)
+  `122`, `134`, `242`, `252`, `295`, `327`, `362`, `369`, `401`, `415`, `416`,
+  `426`, `476`, `676`, `798`, or `all` (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
 - `--output-file FILE` (`-o FILE`) — write the report to `FILE` instead of
@@ -136,7 +136,7 @@ is, not how severe the bug would be if exploited:
 |---|---|---|
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
-| `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-676 (LOW-severity symbols) |
+| `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
@@ -305,8 +305,8 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
 in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-252, CWE-295, CWE-327,
-CWE-362, CWE-369, CWE-415, CWE-416, CWE-426, CWE-476, CWE-676, and CWE-798 were
-added post-v0.1 (see [POST_V01.md](POST_V01.md)).
+CWE-362, CWE-369, CWE-401, CWE-415, CWE-416, CWE-426, CWE-476, CWE-676, and
+CWE-798 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
 
@@ -759,6 +759,69 @@ confidence — it marks an *unchecked* divisor, the statically-visible signal. T
 function is reported by its entry address (radare2's `aflj` carries the offset,
 not a resolved name, for this anchorless check). The detector is architecture-
 aware on x86_64 and AArch64.
+
+### CWE-401 — Missing Release of Memory after Effective Lifetime
+
+A **heap buffer** is obtained from an allocator (`malloc`, `calloc`, `realloc`,
+`reallocarray`, `strdup`, `strndup`, `aligned_alloc`, `valloc`, `pvalloc`,
+`memalign`), and the **only register holding that pointer is then overwritten
+with an unrelated value** — before it is ever freed, stored to memory, returned,
+or passed to another call. Once the sole handle to a freshly-allocated buffer is
+clobbered with no surviving copy, the program can never call `free` on it: the
+memory is leaked.
+
+This is the *inverse-sink* sibling of the heap-lifetime detectors: the source is
+identical to [CWE-122](#cwe-122--heap-based-buffer-overflow) — the **allocator
+return register** (`rax` on x86_64, `x0` on AArch64) — and the alias-tracking
+machinery is the same single-function forward scan shared by
+[CWE-415](#cwe-415--double-free) and [CWE-416](#cwe-416--use-after-free). What
+differs is the sink: where CWE-415's sink is a *second free* and CWE-416's is a
+*use of a freed pointer*, CWE-401's sink is the **loss of the last live alias
+with no preceding free** — the absence of release where release was required
+(the canonical `p = malloc(); … ; p = something_else;` that drops the handle).
+
+The detector is deliberately conservative to keep false positives low (the
+dominant risk for a leak detector):
+
+- A register-to-register move **propagates** the alias (`mov rbx, rax` keeps the
+  handle alive in `rbx`).
+- A **store to memory** (`mov [rbp-8], rax`) lets the pointer escape our
+  in-function view — it may be a struct field, a global, or a slot freed
+  elsewhere — so it is conservatively presumed managed and **not** flagged.
+- A **free** of a live alias releases the buffer — **not** flagged.
+- The pointer left in (or moved to) the **return register** at `ret` is a
+  handoff to the caller — **not** flagged.
+- Passing a live alias to **any other call** leaves ownership ambiguous — **not**
+  flagged.
+- Overwriting the **last** live alias with an unrelated value (a memory reload, a
+  fresh `lea` address, an immediate, an `xor reg,reg`, or an unrelated register)
+  with no surviving copy and no preceding free/escape/return/handoff is the leak.
+
+`realloc` / `reallocarray` are included because their *return* value is the live
+(possibly moved) heap buffer that must be freed, exactly as in CWE-122.
+
+Because reachability of the clobber along the allocated path is not proven
+statically (an intervening branch may free or store the pointer on a path we
+cannot see), every CWE-401 finding is `low` confidence — matching CWE-415 /
+CWE-416 / CWE-122. The detector is architecture-aware on x86_64 and AArch64.
+
+```bash
+$ blight --binary path/to/elf --checks 401 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [401],
+  "findings": [
+    {
+      "cwe": 401,
+      "function": "leaky",
+      "address": "0x401150",
+      "evidence": "heap buffer from malloc has its only register alias overwritten in the same function without being freed, stored, or returned (possible memory leak)",
+      "symbol": "malloc",
+      "confidence": "low"
+    }
+  ]
+}
+```
 
 ### CWE-415 — Double Free
 

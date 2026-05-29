@@ -16,6 +16,7 @@ from blight.detectors import (
     cwe327,
     cwe362,
     cwe369,
+    cwe401,
     cwe415,
     cwe416,
     cwe426,
@@ -105,6 +106,15 @@ from tests.fake_session import (
     cwe122_no_allocator_imports_session,
     arm64_malloc_strcpy_heap_overflow_vuln_session,
     arm64_malloc_strncpy_bounded_session,
+    malloc_clobbered_leak_vuln_session,
+    strdup_clobbered_leak_vuln_session,
+    malloc_freed_session,
+    malloc_stored_escapes_leak_session,
+    malloc_returned_session,
+    malloc_passed_to_call_session,
+    cwe401_no_allocator_imports_session,
+    arm64_malloc_clobbered_leak_vuln_session,
+    arm64_malloc_freed_session,
     access_toctou_vuln_session,
     faccessat_toctou_vuln_session,
     stat_toctou_vuln_session,
@@ -1425,3 +1435,61 @@ class TestCwe122:
 
     def test_arm64_does_not_flag_bounded_copy(self) -> None:
         assert cwe122.detect(arm64_malloc_strncpy_bounded_session()) == []
+
+
+class TestCwe401:
+    """CWE-401 memory leak — in-function alias tracking from an allocator return
+    register; the sink is the clobber of the last live alias with no preceding
+    free / store / return / handoff."""
+
+    def test_flags_clobbered_unfreed_allocation(self) -> None:
+        findings = cwe401.detect(malloc_clobbered_leak_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 401
+        assert f.symbol == "malloc"
+        assert f.function == "leaky"
+        assert f.address == hex(0x401150)
+        assert "memory leak" in f.evidence
+        assert f.confidence == "low"
+
+    def test_flags_leak_through_alias(self) -> None:
+        # rbx = rax; rax reloaded (rbx still alive); rbx reloaded → last handle lost.
+        findings = cwe401.detect(strdup_clobbered_leak_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "strdup"
+        assert f.function == "dup_it"
+
+    def test_does_not_flag_when_freed(self) -> None:
+        # free(ptr) before the handle is lost → released, no leak.
+        assert cwe401.detect(malloc_freed_session()) == []
+
+    def test_does_not_flag_when_stored_to_memory(self) -> None:
+        # The pointer escapes to a stack slot — conservatively not a proven leak.
+        assert cwe401.detect(malloc_stored_escapes_leak_session()) == []
+
+    def test_does_not_flag_when_returned(self) -> None:
+        # The pointer is left in the return register at ret → caller owns it.
+        assert cwe401.detect(malloc_returned_session()) == []
+
+    def test_does_not_flag_when_passed_to_call(self) -> None:
+        # Passed to another call → ownership ambiguous, not flagged.
+        assert cwe401.detect(malloc_passed_to_call_session()) == []
+
+    def test_no_allocator_imports_no_findings(self) -> None:
+        assert cwe401.detect(cwe401_no_allocator_imports_session()) == []
+
+    def test_clean_baseline_no_findings(self) -> None:
+        assert cwe401.detect(clean_baseline_session()) == []
+
+    def test_arm64_flags_clobbered_unfreed_allocation(self) -> None:
+        findings = cwe401.detect(arm64_malloc_clobbered_leak_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 401
+        assert f.symbol == "malloc"
+        assert f.function == "leaky"
+
+    def test_arm64_does_not_flag_when_freed(self) -> None:
+        assert cwe401.detect(arm64_malloc_freed_session()) == []
