@@ -1903,6 +1903,180 @@ def arm64_double_free_nulled_session() -> FakeR2Session:
     return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
 
 
+# --- CWE-122 heap-based-buffer-overflow fixtures ---------------------------
+#
+# Pattern: an allocator (malloc/calloc/strdup/...) returns a heap buffer in rax
+# (x0 on AArch64). A vulnerable case routes that pointer into the destination
+# (first-argument) register of an UNBOUNDED copy (strcpy/strcat/sprintf/gets) in
+# the same function — the fixed-size heap buffer is the copy destination, so it
+# can overflow. Safe cases reassign the destination before the copy, use a
+# bounded copy, or never feed the heap pointer to a copy at all.
+
+
+def malloc_strcpy_heap_overflow_vuln_session() -> FakeR2Session:
+    """malloc() result handed to strcpy as destination, no resize (vulnerable)."""
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="strcpy", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401150, "CALL", "build", "call sym.imp.malloc")],
+        0x401050: [Xref(0x401160, "CALL", "build", "call sym.imp.strcpy")],
+    }
+    # rax = malloc(16); rdi = rax; strcpy(rdi, src) -> heap dest, unbounded copy.
+    build_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0x10"),
+        Instruction(0x401150, "call sym.imp.malloc"),       # rax = heap buffer
+        Instruction(0x401155, "mov rdi, rax"),              # dest = heap buffer
+        Instruction(0x40115a, "lea rsi, str.user_input"),   # source string
+        Instruction(0x401160, "call sym.imp.strcpy"),       # unbounded copy → bug
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: build_ops})
+
+
+def calloc_sprintf_heap_overflow_vuln_session() -> FakeR2Session:
+    """calloc() result routed (via rbx alias) into sprintf destination (vulnerable)."""
+    imports = [
+        Import(name="calloc", plt=0x401040),
+        Import(name="sprintf", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401150, "CALL", "fmt", "call sym.imp.calloc")],
+        0x401050: [Xref(0x401170, "CALL", "fmt", "call sym.imp.sprintf")],
+    }
+    # rax = calloc(...); rbx = rax (alias); rdi = rbx; sprintf(rdi, ...) -> bug.
+    fmt_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.calloc"),       # rax = heap buffer
+        Instruction(0x401155, "mov rbx, rax"),              # alias propagation
+        Instruction(0x401160, "mov rdi, rbx"),              # dest = heap buffer
+        Instruction(0x401168, "lea rsi, str.fmt"),
+        Instruction(0x401170, "call sym.imp.sprintf"),      # unbounded format → bug
+        Instruction(0x401175, "leave"),
+        Instruction(0x401176, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: fmt_ops})
+
+
+def malloc_strncpy_bounded_session() -> FakeR2Session:
+    """malloc() result handed to strncpy (bounded) — must NOT flag (CWE-120 land)."""
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="strncpy", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401150, "CALL", "build", "call sym.imp.malloc")],
+        0x401050: [Xref(0x401160, "CALL", "build", "call sym.imp.strncpy")],
+    }
+    build_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.malloc"),
+        Instruction(0x401155, "mov rdi, rax"),              # dest = heap buffer
+        Instruction(0x40115a, "mov edx, 0x10"),             # explicit length
+        Instruction(0x401160, "call sym.imp.strncpy"),      # bounded → not flagged
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: build_ops})
+
+
+def malloc_reassigned_before_copy_session() -> FakeR2Session:
+    """malloc() result clobbered in rdi before strcpy — dest is a different buffer."""
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="strcpy", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401150, "CALL", "build", "call sym.imp.malloc")],
+        0x401050: [Xref(0x401168, "CALL", "build", "call sym.imp.strcpy")],
+    }
+    # rax = malloc(...); ... ; rdi = [rbp-0x20] (a *different*, stack dest);
+    # strcpy(rdi, src). The heap alias never reaches the copy destination.
+    build_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.malloc"),       # rax = heap buffer
+        Instruction(0x401155, "mov qword [rbp - 0x8], rax"),  # heap ptr stored away
+        Instruction(0x40115d, "lea rdi, [rbp - 0x20]"),     # dest = stack buffer
+        Instruction(0x401162, "lea rsi, str.user_input"),
+        Instruction(0x401168, "call sym.imp.strcpy"),       # dest is NOT the heap ptr
+        Instruction(0x40116d, "leave"),
+        Instruction(0x40116e, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: build_ops})
+
+
+def malloc_no_copy_session() -> FakeR2Session:
+    """malloc() result used but never fed to a copy — nothing to flag."""
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "alloc_only", "call sym.imp.malloc")]}
+    alloc_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.malloc"),
+        Instruction(0x401155, "mov qword [rbp - 0x8], rax"),  # just stored
+        Instruction(0x40115d, "leave"),
+        Instruction(0x40115e, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: alloc_ops})
+
+
+def cwe122_no_allocator_imports_session() -> FakeR2Session:
+    """A session with no heap-allocator imports — nothing to flag."""
+    imports = [
+        Import(name="strcpy", plt=0x401030),
+        Import(name="puts", plt=0x401040),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
+def arm64_malloc_strcpy_heap_overflow_vuln_session() -> FakeR2Session:
+    """AArch64: malloc() result (x0) handed to strcpy destination (x0) — vulnerable."""
+    imports = [
+        Import(name="malloc", plt=0x710),
+        Import(name="strcpy", plt=0x720),
+    ]
+    xrefs = {
+        0x710: [Xref(0x83c, "CALL", "build", "bl sym.imp.malloc")],
+        0x720: [Xref(0x84c, "CALL", "build", "bl sym.imp.strcpy")],
+    }
+    # x0 = malloc(16); x0 stays the destination of strcpy (arg0) -> heap overflow.
+    build_ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x838, "mov w0, 0x10"),
+        Instruction(0x83c, "bl sym.imp.malloc"),            # x0 = heap buffer
+        Instruction(0x840, "adrp x1, str.user_input"),
+        Instruction(0x844, "add x1, x1, str.user_input"),   # x1 = source
+        Instruction(0x84c, "bl sym.imp.strcpy"),            # dest x0 = heap → bug
+        Instruction(0x850, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x854, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: build_ops}, arch="arm64")
+
+
+def arm64_malloc_strncpy_bounded_session() -> FakeR2Session:
+    """AArch64: malloc() result handed to strncpy (bounded) — must NOT flag."""
+    imports = [
+        Import(name="malloc", plt=0x710),
+        Import(name="strncpy", plt=0x720),
+    ]
+    xrefs = {
+        0x710: [Xref(0x83c, "CALL", "build", "bl sym.imp.malloc")],
+        0x720: [Xref(0x848, "CALL", "build", "bl sym.imp.strncpy")],
+    }
+    build_ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x838, "mov w0, 0x10"),
+        Instruction(0x83c, "bl sym.imp.malloc"),            # x0 = heap buffer
+        Instruction(0x840, "mov w2, 0x10"),                 # explicit length
+        Instruction(0x848, "bl sym.imp.strncpy"),           # bounded → not flagged
+        Instruction(0x84c, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x850, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: build_ops}, arch="arm64")
+
+
 def cwe798_all_session() -> FakeR2Session:
     """A mix of every CWE-798 signal in one binary, plus benign neighbours."""
     return _strings_session(
