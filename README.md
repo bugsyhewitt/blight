@@ -133,8 +133,8 @@ is, not how severe the bug would be if exploited:
 
 | Confidence | Meaning | Applies to |
 |---|---|---|
-| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-676 (HIGH-severity symbols) |
-| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols) |
+| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-676 (HIGH-severity symbols) |
+| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols) |
 | `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
@@ -303,8 +303,41 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-476, and
-CWE-676 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
+in v0.1; CWE-22, CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-476,
+and CWE-676 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
+
+### CWE-22 — Path Traversal
+
+Calls to filesystem routines that **consume a pathname** — the sinks where a
+path-traversal vulnerability lands. If the path is assembled from untrusted
+input (a request parameter, an archive entry name, an environment variable) and
+is not first canonicalised (`realpath`) and confined to an intended base
+directory, an attacker can reach files outside it with `../` sequences or
+absolute paths. The call to the path-consuming routine is the exact spot a
+reviewer must inspect.
+
+This is a pure PLT-lookup check (the same shape as CWE-89, CWE-119, CWE-327,
+CWE-295 and CWE-676): it does **not** read the path argument out of the
+disassembly — the pathname arrives in different argument positions across these
+routines and is frequently built across basic blocks, so the call to a
+path-consuming routine is itself the finding, surfaced at the per-symbol
+confidence for triage. Two severity tiers:
+
+- **HIGH** — routines that destroy, replace or escalate via a pathname:
+  `unlink` / `unlinkat` / `remove` / `rmdir` (delete), `rename` (move/overwrite),
+  `symlink` / `link` (the classic `../`-plus-symlink escape), `chmod` / `chown` /
+  `lchown`, `mkdir`, and the exec-by-path family `execv` / `execve` / `execvp`.
+- **MEDIUM** — routines that open or read metadata for a pathname:
+  `open` / `open64` / `openat` / `fopen` / `fopen64` / `freopen` / `creat`,
+  `opendir`, `access` / `stat` / `lstat` (also a TOCTOU hint), and `readlink`.
+  These appear routinely in fully-validated code, so the call is a *triage*
+  signal, not a confirmed bug.
+
+The canonicalisation primitive `realpath` is deliberately **not** flagged — it
+is part of the recommended mitigation (resolve, then verify the result is under
+the intended base directory), and flagging it would invert the signal. Because
+it is a pure PLT lookup the check is architecture-agnostic — it works on every
+architecture radare2 can disassemble.
 
 ### CWE-78 — OS Command Injection
 
@@ -671,8 +704,8 @@ $ blight --binary path/to/elf --checks 676 --format json
 
 `blight` supports **x86_64** and **AArch64 (arm64)** ELF binaries.
 
-The CWE-89, CWE-119, CWE-120, CWE-242, CWE-295, CWE-327, and CWE-676 detectors
-flag any call site to a dangerous symbol and are therefore architecture-agnostic
+The CWE-22, CWE-89, CWE-119, CWE-120, CWE-242, CWE-295, CWE-327, and CWE-676
+detectors flag any call site to a dangerous symbol and are therefore architecture-agnostic
 — they work on every architecture radare2 can disassemble. The CWE-78 and CWE-134 detectors inspect
 the register that carries a specific argument (the command string, the format
 string), and CWE-476 and CWE-252 inspect the *return* register (`rax`/`x0`) plus

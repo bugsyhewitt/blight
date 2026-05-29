@@ -674,6 +674,99 @@ def cwe119_clean_session() -> FakeR2Session:
     return FakeR2Session(imports, xrefs={})
 
 
+# --- CWE-22 path-traversal fixtures ----------------------------------------
+#
+# Pure PLT-lookup detector (same shape as CWE-89 / CWE-119 / CWE-327 / CWE-676):
+# the presence of a call to a path-consuming filesystem routine is the finding.
+# No data flow — the call site is where traversal lands when the path is built
+# from untrusted input and not canonicalised/confined.
+
+def unlink_vuln_session() -> FakeR2Session:
+    """A single unlink() call (HIGH — destructive delete by path)."""
+    imports = [Import(name="unlink", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "del_file", "call sym.imp.unlink")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def rename_vuln_session() -> FakeR2Session:
+    """A single rename() call (HIGH — move/overwrite by path)."""
+    imports = [Import(name="rename", plt=0x401050)]
+    xrefs = {0x401050: [Xref(0x401172, "CALL", "move_file", "call sym.imp.rename")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def symlink_vuln_session() -> FakeR2Session:
+    """A single symlink() call (HIGH — classic ../-plus-symlink escape)."""
+    imports = [Import(name="symlink", plt=0x401060)]
+    xrefs = {0x401060: [Xref(0x401184, "CALL", "make_link", "call sym.imp.symlink")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def execve_vuln_session() -> FakeR2Session:
+    """A single execve() call (HIGH — run a binary chosen by path)."""
+    imports = [Import(name="execve", plt=0x401070)]
+    xrefs = {0x401070: [Xref(0x401196, "CALL", "spawn", "call sym.imp.execve")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def open_vuln_session() -> FakeR2Session:
+    """A single open() call (MEDIUM — open a file by path)."""
+    imports = [Import(name="open", plt=0x401080)]
+    xrefs = {0x401080: [Xref(0x4011a8, "CALL", "load_cfg", "call sym.imp.open")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def fopen_path_vuln_session() -> FakeR2Session:
+    """A single fopen() call (MEDIUM — open a file by path)."""
+    imports = [Import(name="fopen", plt=0x401090)]
+    xrefs = {0x401090: [Xref(0x4011ba, "CALL", "read_doc", "call sym.imp.fopen")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def access_vuln_session() -> FakeR2Session:
+    """A single access() call (MEDIUM — test a path; also a TOCTOU hint)."""
+    imports = [Import(name="access", plt=0x4010a0)]
+    xrefs = {0x4010a0: [Xref(0x4011cc, "CALL", "check_path", "call sym.imp.access")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe22_all_session() -> FakeR2Session:
+    """One call to each of seven representative CWE-22 routines.
+
+    Includes a safe neighbour (realpath, the canonicalisation primitive) that
+    must NOT fire.
+    """
+    imports = [
+        Import(name="unlink", plt=0x401040),
+        Import(name="rename", plt=0x401050),
+        Import(name="symlink", plt=0x401060),
+        Import(name="execve", plt=0x401070),
+        Import(name="open", plt=0x401080),
+        Import(name="fopen", plt=0x401090),
+        Import(name="access", plt=0x4010a0),
+        Import(name="realpath", plt=0x4010b0),  # safe API, must not fire
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "del_file", "call sym.imp.unlink")],
+        0x401050: [Xref(0x401172, "CALL", "move_file", "call sym.imp.rename")],
+        0x401060: [Xref(0x401184, "CALL", "make_link", "call sym.imp.symlink")],
+        0x401070: [Xref(0x401196, "CALL", "spawn", "call sym.imp.execve")],
+        0x401080: [Xref(0x4011a8, "CALL", "load_cfg", "call sym.imp.open")],
+        0x401090: [Xref(0x4011ba, "CALL", "read_doc", "call sym.imp.fopen")],
+        0x4010a0: [Xref(0x4011cc, "CALL", "check_path", "call sym.imp.access")],
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe22_clean_session() -> FakeR2Session:
+    """Only the canonicalisation primitive imported — no CWE-22 sink present."""
+    imports = [
+        Import(name="realpath", plt=0x401040),
+        Import(name="printf", plt=0x401050),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
 # --- CWE-476 NULL-pointer-dereference fixtures -----------------------------
 #
 # Pattern: an allocator (malloc/calloc/fopen/...) returns a pointer in rax.

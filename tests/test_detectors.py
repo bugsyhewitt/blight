@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from blight.detectors import (
+    cwe22,
     cwe78,
     cwe89,
     cwe119,
@@ -20,8 +21,17 @@ from tests.fake_session import (
     arm64_malloc_deref_vuln_session,
     arm64_setuid_checked_session,
     arm64_setuid_unchecked_vuln_session,
+    access_vuln_session,
     asctime_vuln_session,
     blowfish_vuln_session,
+    cwe22_all_session,
+    cwe22_clean_session,
+    execve_vuln_session,
+    fopen_path_vuln_session,
+    open_vuln_session,
+    rename_vuln_session,
+    symlink_vuln_session,
+    unlink_vuln_session,
     calloc_stored_escapes_session,
     chroot_unchecked_fallthrough_session,
     clean_baseline_session,
@@ -82,6 +92,115 @@ from tests.fake_session import (
     tmpnam_vuln_session,
     write_return_saved_session,
 )
+
+
+class TestCwe22:
+    def test_flags_unlink_high(self) -> None:
+        findings = cwe22.detect(unlink_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 22
+        assert f.symbol == "unlink"
+        assert f.function == "del_file"
+        assert f.address == hex(0x401160)
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "canonicalised" in f.evidence
+
+    def test_flags_rename_high(self) -> None:
+        findings = cwe22.detect(rename_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 22
+        assert f.symbol == "rename"
+        assert f.function == "move_file"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_symlink_high(self) -> None:
+        findings = cwe22.detect(symlink_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 22
+        assert f.symbol == "symlink"
+        assert f.function == "make_link"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_execve_high(self) -> None:
+        findings = cwe22.detect(execve_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 22
+        assert f.symbol == "execve"
+        assert f.function == "spawn"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_open_medium(self) -> None:
+        # The open/read-metadata sinks appear routinely in validated code, so
+        # they are MEDIUM, not HIGH.
+        findings = cwe22.detect(open_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 22
+        assert f.symbol == "open"
+        assert f.function == "load_cfg"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_fopen_medium(self) -> None:
+        findings = cwe22.detect(fopen_path_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 22
+        assert f.symbol == "fopen"
+        assert f.function == "read_doc"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_access_medium(self) -> None:
+        findings = cwe22.detect(access_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 22
+        assert f.symbol == "access"
+        assert f.function == "check_path"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_all_representative_routines(self) -> None:
+        findings = cwe22.detect(cwe22_all_session())
+        symbols = {f.symbol for f in findings}
+        assert symbols == {
+            "unlink",
+            "rename",
+            "symlink",
+            "execve",
+            "open",
+            "fopen",
+            "access",
+        }
+        for f in findings:
+            assert f.cwe == 22
+            assert f.function
+            assert f.address.startswith("0x")
+            assert f.evidence
+            assert f.confidence in ("high", "medium", "low")
+
+    def test_does_not_flag_realpath(self) -> None:
+        # cwe22_all imports realpath (the canonicalisation primitive); it is the
+        # safe mitigation and must never be flagged — flagging it inverts signal.
+        findings = cwe22.detect(cwe22_all_session())
+        assert all(f.symbol != "realpath" for f in findings)
+
+    def test_clean_session_no_findings(self) -> None:
+        # Only realpath + printf imported — no CWE-22 sink.
+        assert cwe22.detect(cwe22_clean_session()) == []
+
+    def test_does_not_flag_absent_routine(self) -> None:
+        # clean-baseline has none of the CWE-22 routines.
+        assert cwe22.detect(clean_baseline_session()) == []
 
 
 class TestCwe120:

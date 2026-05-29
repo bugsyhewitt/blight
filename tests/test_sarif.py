@@ -123,6 +123,7 @@ class TestSarifLevelMapping:
     """Verify severity-to-SARIF-level mapping."""
 
     @pytest.mark.parametrize("cwe,expected", [
+        (22,  "error"),
         (78,  "error"),
         (89,  "error"),
         (120, "error"),
