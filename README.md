@@ -43,13 +43,13 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {78,120,134,242,252,327,476,676,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {78,120,134,242,252,295,327,476,676,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
 - `--checks` — which CWE check to run; one of `78`, `120`, `134`, `242`, `252`,
-  `327`, `476`, `676`, or `all` (default: `all`)
+  `295`, `327`, `476`, `676`, or `all` (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
 - `--output-file FILE` (`-o FILE`) — write the report to `FILE` instead of
@@ -90,7 +90,7 @@ and `findings` list:
 ```json
 {
   "directory": "./firmware/bin",
-  "checks": [78, 120, 134, 242, 252, 476, 676],
+  "checks": [78, 120, 134, 242, 252, 295, 327, 476, 676],
   "results": [
     { "binary": "./firmware/bin/httpd",  "findings": [ /* ... */ ] },
     { "binary": "./firmware/bin/telnetd", "findings": [ /* ... */ ] }
@@ -133,8 +133,8 @@ is, not how severe the bug would be if exploited:
 
 | Confidence | Meaning | Applies to |
 |---|---|---|
-| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-120, CWE-242, CWE-327 (HIGH-severity symbols), CWE-676 (HIGH-severity symbols) |
-| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-78, CWE-134, CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols) |
+| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-676 (HIGH-severity symbols) |
+| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-78, CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols) |
 | `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
@@ -233,7 +233,7 @@ show their `error` string instead of findings), followed by a corpus total:
 ```bash
 $ blight --binary ./firmware/bin --checks all --format text
 directory: ./firmware/bin
-checks: 78, 120, 134, 242, 252, 476, 676
+checks: 78, 120, 134, 242, 252, 295, 327, 476, 676
 
   binary: ./firmware/bin/httpd
   1 finding (high: 1, medium: 0, low: 0)
@@ -303,8 +303,8 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-134, CWE-252, CWE-327, CWE-476, and CWE-676 were added post-v0.1
-(see [POST_V01.md](POST_V01.md)).
+in v0.1; CWE-134, CWE-252, CWE-295, CWE-327, CWE-476, and CWE-676 were added
+post-v0.1 (see [POST_V01.md](POST_V01.md)).
 
 ### CWE-78 — OS Command Injection
 
@@ -386,6 +386,57 @@ $ blight --binary tests/fixtures/gets-vuln --checks 242 --format json
   ]
 }
 ```
+
+### CWE-295 — Improper Certificate Validation
+
+Calls to library routines whose **presence** marks the spot where TLS/SSL
+certificate or hostname verification is configured by hand — exactly where
+verification is most often disabled or weakened (`SSL_VERIFY_NONE`, a verify
+callback that always returns success, `CURLOPT_SSL_VERIFYPEER` set to `0`, or a
+hostname check skipped). Broken certificate validation is one of the most
+frequently shipped TLS flaws on the embedded/firmware targets blight serves.
+
+Like CWE-327 and CWE-676 this is a pure PLT-lookup check — it does **not** read
+the verify-mode argument out of the disassembly (the constant is frequently
+loaded indirectly), so the call to a verification-policy routine is itself the
+finding and the result is surfaced for triage. The severity is in the evidence
+string; the routine, not the mode, is the signal.
+
+| Symbol | Severity | Why it's flagged | Confirm / use instead |
+|---|---|---|---|
+| `SSL_CTX_set_verify` / `SSL_set_verify` | HIGH | Sets the verify mode (often `SSL_VERIFY_NONE`) | Mode must include `SSL_VERIFY_PEER`; callback must fail closed |
+| `SSL_CTX_set_cert_verify_callback` | HIGH | Replaces the built-in chain check wholesale | Confirm the callback actually validates |
+| `gnutls_certificate_set_verify_function` | HIGH | Installs a custom GnuTLS verify callback | Confirm it fails closed |
+| `gnutls_certificate_verify_peers2` | HIGH | Does not check the hostname | `gnutls_certificate_verify_peers3` / `gnutls_session_set_verify_cert` |
+| `mbedtls_ssl_conf_authmode` | HIGH | Sets the verify mode (often `MBEDTLS_SSL_VERIFY_NONE`) | Use `MBEDTLS_SSL_VERIFY_REQUIRED` |
+| `SSL_get_peer_certificate` | MEDIUM | Returns a cert even when verification failed | Pair with `SSL_get_verify_result` |
+| `curl_easy_setopt` | MEDIUM | Sink for `CURLOPT_SSL_VERIFYPEER` / `CURLOPT_SSL_VERIFYHOST` being `0` | Leave both at their secure defaults |
+
+The correct verification APIs — `SSL_get_verify_result`, `X509_check_host`,
+`gnutls_certificate_verify_peers3`, `gnutls_session_set_verify_cert` — are
+**not** flagged.
+
+```bash
+$ blight --binary path/to/elf --checks 295 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [295],
+  "findings": [
+    {
+      "cwe": 295,
+      "function": "init_tls",
+      "address": "0x401160",
+      "evidence": "[HIGH] call to SSL_CTX_set_verify: SSL_CTX_set_verify configures the verify mode — confirm it is not SSL_VERIFY_NONE and that a verify callback does not force success",
+      "symbol": "SSL_CTX_set_verify",
+      "confidence": "high"
+    }
+  ]
+}
+```
+
+The confidence mirrors the per-symbol severity (HIGH→`high`, MEDIUM→`medium`),
+the same policy as CWE-327 and CWE-676. Because it is a pure PLT lookup it is
+architecture-agnostic and works on every architecture radare2 can disassemble.
 
 ### CWE-327 — Use of a Broken or Risky Cryptographic Algorithm
 
@@ -542,8 +593,8 @@ $ blight --binary path/to/elf --checks 676 --format json
 
 `blight` supports **x86_64** and **AArch64 (arm64)** ELF binaries.
 
-The CWE-120, CWE-242, CWE-327, and CWE-676 detectors flag any call site to a
-dangerous symbol and are therefore architecture-agnostic — they work on every
+The CWE-120, CWE-242, CWE-295, CWE-327, and CWE-676 detectors flag any call site
+to a dangerous symbol and are therefore architecture-agnostic — they work on every
 architecture radare2 can disassemble. The CWE-78 and CWE-134 detectors inspect
 the register that carries a specific argument (the command string, the format
 string), and CWE-476 and CWE-252 inspect the *return* register (`rax`/`x0`) plus

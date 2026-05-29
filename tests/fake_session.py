@@ -408,6 +408,109 @@ def cwe327_clean_session() -> FakeR2Session:
     return FakeR2Session(imports, xrefs={})
 
 
+# --- CWE-295 improper-certificate-validation fixtures ----------------------
+#
+# Pure PLT-lookup detector (same shape as CWE-327 / CWE-676): the presence of a
+# call to a TLS verification-policy routine is the finding. No data flow.
+
+def ssl_set_verify_vuln_session() -> FakeR2Session:
+    """A single SSL_CTX_set_verify() call (the verify-mode toggle)."""
+    imports = [Import(name="SSL_CTX_set_verify", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "init_tls", "call sym.imp.SSL_CTX_set_verify")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def ssl_get_peer_cert_vuln_session() -> FakeR2Session:
+    """A single SSL_get_peer_certificate() call (presence is not trust)."""
+    imports = [Import(name="SSL_get_peer_certificate", plt=0x401050)]
+    xrefs = {
+        0x401050: [
+            Xref(0x401172, "CALL", "check_cert", "call sym.imp.SSL_get_peer_certificate")
+        ]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def curl_setopt_vuln_session() -> FakeR2Session:
+    """A single curl_easy_setopt() call (CURLOPT_SSL_VERIFY* sink)."""
+    imports = [Import(name="curl_easy_setopt", plt=0x401060)]
+    xrefs = {
+        0x401060: [Xref(0x401184, "CALL", "setup", "call sym.imp.curl_easy_setopt")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def gnutls_verify_peers2_vuln_session() -> FakeR2Session:
+    """A single gnutls_certificate_verify_peers2() call (no hostname check)."""
+    imports = [Import(name="gnutls_certificate_verify_peers2", plt=0x401070)]
+    xrefs = {
+        0x401070: [
+            Xref(
+                0x401196,
+                "CALL",
+                "verify",
+                "call sym.imp.gnutls_certificate_verify_peers2",
+            )
+        ]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def mbedtls_authmode_vuln_session() -> FakeR2Session:
+    """A single mbedtls_ssl_conf_authmode() call (verify-mode toggle)."""
+    imports = [Import(name="mbedtls_ssl_conf_authmode", plt=0x401080)]
+    xrefs = {
+        0x401080: [
+            Xref(0x4011a8, "CALL", "conf", "call sym.imp.mbedtls_ssl_conf_authmode")
+        ]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe295_all_session() -> FakeR2Session:
+    """One call to each of five representative CWE-295 routines."""
+    imports = [
+        Import(name="SSL_CTX_set_verify", plt=0x401040),
+        Import(name="SSL_get_peer_certificate", plt=0x401050),
+        Import(name="curl_easy_setopt", plt=0x401060),
+        Import(name="gnutls_certificate_verify_peers2", plt=0x401070),
+        Import(name="mbedtls_ssl_conf_authmode", plt=0x401080),
+        Import(name="SSL_get_verify_result", plt=0x4010a0),  # correct API, must NOT fire
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "init_tls", "call sym.imp.SSL_CTX_set_verify")],
+        0x401050: [
+            Xref(0x401172, "CALL", "check_cert", "call sym.imp.SSL_get_peer_certificate")
+        ],
+        0x401060: [Xref(0x401184, "CALL", "setup", "call sym.imp.curl_easy_setopt")],
+        0x401070: [
+            Xref(
+                0x401196,
+                "CALL",
+                "verify",
+                "call sym.imp.gnutls_certificate_verify_peers2",
+            )
+        ],
+        0x401080: [
+            Xref(0x4011a8, "CALL", "conf", "call sym.imp.mbedtls_ssl_conf_authmode")
+        ],
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe295_clean_session() -> FakeR2Session:
+    """Only correct verification APIs imported — no CWE-295 routine present."""
+    imports = [
+        Import(name="SSL_get_verify_result", plt=0x401040),
+        Import(name="X509_check_host", plt=0x401050),
+        Import(name="gnutls_certificate_verify_peers3", plt=0x401060),
+        Import(name="gnutls_session_set_verify_cert", plt=0x401070),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
 # --- CWE-476 NULL-pointer-dereference fixtures -----------------------------
 #
 # Pattern: an allocator (malloc/calloc/fopen/...) returns a pointer in rax.

@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
-from blight.detectors import cwe78, cwe120, cwe134, cwe242, cwe252, cwe327, cwe476, cwe676
+from blight.detectors import (
+    cwe78,
+    cwe120,
+    cwe134,
+    cwe242,
+    cwe252,
+    cwe295,
+    cwe327,
+    cwe476,
+    cwe676,
+)
 from tests.fake_session import (
     arm64_malloc_checked_session,
     arm64_malloc_deref_vuln_session,
@@ -14,10 +24,17 @@ from tests.fake_session import (
     chroot_unchecked_fallthrough_session,
     clean_baseline_session,
     ctime_vuln_session,
+    curl_setopt_vuln_session,
     cwe252_clean_session,
+    cwe295_all_session,
+    cwe295_clean_session,
     cwe327_all_session,
     cwe327_clean_session,
     cwe476_no_allocators_session,
+    gnutls_verify_peers2_vuln_session,
+    mbedtls_authmode_vuln_session,
+    ssl_get_peer_cert_vuln_session,
+    ssl_set_verify_vuln_session,
     cwe676_all_session,
     cwe676_clean_session,
     des_vuln_session,
@@ -316,6 +333,91 @@ class TestCwe327:
     def test_does_not_flag_absent_routine(self) -> None:
         # clean-baseline has none of the CWE-327 routines.
         assert cwe327.detect(clean_baseline_session()) == []
+
+
+class TestCwe295:
+    def test_flags_ssl_set_verify(self) -> None:
+        findings = cwe295.detect(ssl_set_verify_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 295
+        assert f.symbol == "SSL_CTX_set_verify"
+        assert f.function == "init_tls"
+        assert f.address == hex(0x401160)
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "SSL_VERIFY_NONE" in f.evidence
+
+    def test_flags_ssl_get_peer_certificate_medium(self) -> None:
+        findings = cwe295.detect(ssl_get_peer_cert_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 295
+        assert f.symbol == "SSL_get_peer_certificate"
+        assert f.function == "check_cert"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+        assert "SSL_get_verify_result" in f.evidence
+
+    def test_flags_curl_easy_setopt_medium(self) -> None:
+        findings = cwe295.detect(curl_setopt_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 295
+        assert f.symbol == "curl_easy_setopt"
+        assert f.function == "setup"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+        assert "CURLOPT_SSL_VERIFYPEER" in f.evidence
+
+    def test_flags_gnutls_verify_peers2(self) -> None:
+        findings = cwe295.detect(gnutls_verify_peers2_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 295
+        assert f.symbol == "gnutls_certificate_verify_peers2"
+        assert f.function == "verify"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "hostname" in f.evidence
+
+    def test_flags_mbedtls_authmode(self) -> None:
+        findings = cwe295.detect(mbedtls_authmode_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 295
+        assert f.symbol == "mbedtls_ssl_conf_authmode"
+        assert f.function == "conf"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "MBEDTLS_SSL_VERIFY_NONE" in f.evidence
+
+    def test_flags_all_representative_routines(self) -> None:
+        findings = cwe295.detect(cwe295_all_session())
+        symbols = {f.symbol for f in findings}
+        assert symbols == {
+            "SSL_CTX_set_verify",
+            "SSL_get_peer_certificate",
+            "curl_easy_setopt",
+            "gnutls_certificate_verify_peers2",
+            "mbedtls_ssl_conf_authmode",
+        }
+        # SSL_get_verify_result is the correct API and must NOT be flagged.
+        assert "SSL_get_verify_result" not in symbols
+        for f in findings:
+            assert f.cwe == 295
+            assert f.function
+            assert f.address.startswith("0x")
+            assert f.evidence
+            assert f.confidence in ("high", "medium", "low")
+
+    def test_clean_session_no_findings(self) -> None:
+        # Only correct verification APIs are imported.
+        assert cwe295.detect(cwe295_clean_session()) == []
+
+    def test_does_not_flag_absent_routine(self) -> None:
+        # clean-baseline has none of the CWE-295 routines.
+        assert cwe295.detect(clean_baseline_session()) == []
 
 
 class TestCwe476:
