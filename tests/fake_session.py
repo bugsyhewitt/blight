@@ -2869,3 +2869,275 @@ def cwe732_multi_call_session() -> FakeR2Session:
     return FakeR2Session(
         imports, xrefs, {0x401140: vuln_ops, 0x401240: safe_ops}
     )
+
+
+# --- CWE-330 predictable-PRNG-seeding fixtures -----------------------------
+#
+# Pattern: a seeding routine (srand / srandom / srand48 / seed48) is called with
+# a seed that is either (a) the return value of a publicly observable clock /
+# pid source (HIGH — predictable seed) or (b) a small constant immediate
+# (MEDIUM — same-seed mistake). Both forms are precision-first: the evidence
+# is read literally out of the disassembly.
+
+def cwe330_srand_time_vuln_session() -> FakeR2Session:
+    """x86_64: srand(time(NULL)) — return of time() flows into edi (HIGH)."""
+    imports = [
+        Import(name="srand", plt=0x401040),
+        Import(name="time", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401168, "CALL", "seed_prng", "call sym.imp.srand")],
+        0x401050: [Xref(0x401150, "CALL", "seed_prng", "call sym.imp.time")],
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "xor edi, edi"),              # time(NULL)
+        Instruction(0x401150, "call sym.imp.time"),
+        Instruction(0x401155, "mov edi, eax"),              # seed reg ← return
+        Instruction(0x401168, "call sym.imp.srand"),
+        Instruction(0x40116d, "leave"),
+        Instruction(0x40116e, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe330_srand_getpid_vuln_session() -> FakeR2Session:
+    """x86_64: srand(getpid()) — pid is a predictable seed (HIGH)."""
+    imports = [
+        Import(name="srand", plt=0x401040),
+        Import(name="getpid", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401168, "CALL", "seed_prng", "call sym.imp.srand")],
+        0x401050: [Xref(0x401150, "CALL", "seed_prng", "call sym.imp.getpid")],
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.getpid"),
+        Instruction(0x401155, "mov edi, eax"),              # seed ← return
+        Instruction(0x401168, "call sym.imp.srand"),
+        Instruction(0x40116d, "leave"),
+        Instruction(0x40116e, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe330_srand_constant_zero_session() -> FakeR2Session:
+    """x86_64: srand(0) — constant immediate seed (MEDIUM, same-seed mistake)."""
+    imports = [Import(name="srand", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "seed_zero", "call sym.imp.srand")]}
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401148, "mov edi, 0"),                # constant seed = 0
+        Instruction(0x401160, "call sym.imp.srand"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe330_srand_constant_small_session() -> FakeR2Session:
+    """x86_64: srand(42) — small constant immediate seed (MEDIUM)."""
+    imports = [Import(name="srand", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "seed_42", "call sym.imp.srand")]}
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401148, "mov edi, 0x2a"),             # seed = 42
+        Instruction(0x401160, "call sym.imp.srand"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe330_srand_large_constant_safe_session() -> FakeR2Session:
+    """x86_64: srand(0xdeadbeef) — large constant, deliberately NOT flagged.
+
+    A 32-bit literal embedded by the build system is probably a domain knob,
+    not a same-seed mistake. The detector is precision-first: only seeds at or
+    below 0xff get the MEDIUM tier.
+    """
+    imports = [Import(name="srand", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "seed_big", "call sym.imp.srand")]}
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401148, "mov edi, 0xdeadbeef"),       # large literal
+        Instruction(0x401160, "call sym.imp.srand"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe330_srand_nonconstant_safe_session() -> FakeR2Session:
+    """x86_64: srand(seed_from_var) — seed is a register-to-register move from
+    a value the detector cannot resolve. Precision-first: do NOT flag.
+    """
+    imports = [Import(name="srand", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "seed_var", "call sym.imp.srand")]}
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401148, "mov edi, ecx"),              # seed from a var
+        Instruction(0x401160, "call sym.imp.srand"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe330_srand_intervening_call_safe_session() -> FakeR2Session:
+    """x86_64: time() is called, but an UNRELATED call sits between time() and
+    the seed-register write — the seed reg ← eax sequence no longer proves
+    time()'s return reached srand. Precision-first: do NOT flag.
+    """
+    imports = [
+        Import(name="srand", plt=0x401040),
+        Import(name="time", plt=0x401050),
+        Import(name="puts", plt=0x401060),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401180, "CALL", "noisy_seed", "call sym.imp.srand")],
+        0x401050: [Xref(0x401150, "CALL", "noisy_seed", "call sym.imp.time")],
+        0x401060: [Xref(0x401168, "CALL", "noisy_seed", "call sym.imp.puts")],
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.time"),
+        Instruction(0x401168, "call sym.imp.puts"),         # clobbers eax
+        Instruction(0x40116d, "mov edi, eax"),              # eax is now puts()'s return
+        Instruction(0x401180, "call sym.imp.srand"),
+        Instruction(0x401185, "leave"),
+        Instruction(0x401186, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe330_srandom_gettimeofday_vuln_session() -> FakeR2Session:
+    """x86_64: srandom(gettimeofday-derived) — covers the srandom alias and the
+    gettimeofday predictable source (HIGH).
+    """
+    imports = [
+        Import(name="srandom", plt=0x401040),
+        Import(name="gettimeofday", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401168, "CALL", "seed_prng", "call sym.imp.srandom")],
+        0x401050: [
+            Xref(0x401150, "CALL", "seed_prng", "call sym.imp.gettimeofday")
+        ],
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.gettimeofday"),
+        Instruction(0x401155, "mov edi, eax"),
+        Instruction(0x401168, "call sym.imp.srandom"),
+        Instruction(0x40116d, "leave"),
+        Instruction(0x40116e, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe330_srand48_constant_session() -> FakeR2Session:
+    """x86_64: srand48(1) — covers the srand48 alias with a constant (MEDIUM)."""
+    imports = [Import(name="srand48", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "seed_drand", "call sym.imp.srand48")]}
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401148, "mov edi, 1"),                # constant = 1
+        Instruction(0x401160, "call sym.imp.srand48"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe330_clean_session() -> FakeR2Session:
+    """No seeding imports — nothing for CWE-330 to anchor on."""
+    imports = [
+        Import(name="getrandom", plt=0x401030),             # the safe API
+        Import(name="puts", plt=0x401040),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
+def cwe330_arm64_srand_time_vuln_session() -> FakeR2Session:
+    """AArch64: srand(time(NULL)) — return of time() flows into w0 (HIGH)."""
+    imports = [
+        Import(name="srand", plt=0x710),
+        Import(name="time", plt=0x720),
+    ]
+    xrefs = {
+        0x710: [Xref(0x850, "CALL", "seed_prng", "bl sym.imp.srand")],
+        0x720: [Xref(0x83c, "CALL", "seed_prng", "bl sym.imp.time")],
+    }
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x10]!"),
+        Instruction(0x838, "mov x0, 0"),                    # time(NULL)
+        Instruction(0x83c, "bl sym.imp.time"),
+        Instruction(0x840, "mov w0, w0"),                   # seed reg ← return
+        Instruction(0x850, "bl sym.imp.srand"),
+        Instruction(0x854, "ldp x29, x30, [sp], 0x10"),
+        Instruction(0x858, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe330_arm64_srand_constant_session() -> FakeR2Session:
+    """AArch64: srand(0) — constant seed in w0 (MEDIUM)."""
+    imports = [Import(name="srand", plt=0x710)]
+    xrefs = {0x710: [Xref(0x840, "CALL", "seed_zero", "bl sym.imp.srand")]}
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x10]!"),
+        Instruction(0x838, "mov w0, 0"),                    # constant seed = 0
+        Instruction(0x840, "bl sym.imp.srand"),
+        Instruction(0x844, "ldp x29, x30, [sp], 0x10"),
+        Instruction(0x848, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe330_arm64_srand_nonconstant_safe_session() -> FakeR2Session:
+    """AArch64: srand(reg_from_var) — non-constant, non-return-flow seed.
+
+    Precision-first: do NOT flag.
+    """
+    imports = [Import(name="srand", plt=0x710)]
+    xrefs = {0x710: [Xref(0x840, "CALL", "seed_var", "bl sym.imp.srand")]}
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x10]!"),
+        Instruction(0x838, "mov w0, w3"),                   # seed from a var
+        Instruction(0x840, "bl sym.imp.srand"),
+        Instruction(0x844, "ldp x29, x30, [sp], 0x10"),
+        Instruction(0x848, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe330_multi_call_session() -> FakeR2Session:
+    """Two srand sites: one predictable (flag), one non-constant (skip)."""
+    imports = [
+        Import(name="srand", plt=0x401040),
+        Import(name="time", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [
+            Xref(0x401168, "CALL", "predictable_seed", "call sym.imp.srand"),
+            Xref(0x401260, "CALL", "runtime_seed", "call sym.imp.srand"),
+        ],
+        0x401050: [Xref(0x401150, "CALL", "predictable_seed", "call sym.imp.time")],
+    }
+    vuln_ops = [
+        Instruction(0x401140, "xor edi, edi"),
+        Instruction(0x401150, "call sym.imp.time"),
+        Instruction(0x401155, "mov edi, eax"),
+        Instruction(0x401168, "call sym.imp.srand"),
+        Instruction(0x40116d, "ret"),
+    ]
+    safe_ops = [
+        Instruction(0x401240, "mov edi, ecx"),              # non-constant → skip
+        Instruction(0x401260, "call sym.imp.srand"),
+        Instruction(0x401265, "ret"),
+    ]
+    return FakeR2Session(
+        imports, xrefs, {0x401140: vuln_ops, 0x401240: safe_ops}
+    )

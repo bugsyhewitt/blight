@@ -16,6 +16,7 @@ Severity mapping (no severity field on Finding — derived from CWE class):
   CWE-242 (Use of Inherently Dangerous)  → MEDIUM → "warning"
   CWE-295 (Improper Certificate Valid.)  → HIGH  → "error"
   CWE-327 (Broken/Risky Cryptography)    → HIGH  → "error"
+  CWE-330 (Insufficiently Random Values) → HIGH  → "error"
   CWE-401 (Missing Memory Release / Leak)→ HIGH  → "error"
   CWE-415 (Double Free)                  → HIGH  → "error"
   CWE-416 (Use After Free)               → HIGH  → "error"
@@ -52,6 +53,7 @@ _CWE_META: dict[int, tuple[str, str]] = {
     242: ("Use of Inherently Dangerous Function", "warning"),
     295: ("Improper Certificate Validation", "error"),
     327: ("Use of a Broken or Risky Cryptographic Algorithm", "error"),
+    330: ("Use of Insufficiently Random Values", "error"),
     401: ("Missing Release of Memory after Effective Lifetime", "error"),
     415: ("Double Free", "error"),
     416: ("Use After Free", "error"),

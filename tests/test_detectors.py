@@ -16,6 +16,7 @@ from blight.detectors import (
     cwe252,
     cwe295,
     cwe327,
+    cwe330,
     cwe362,
     cwe369,
     cwe401,
@@ -72,6 +73,20 @@ from tests.fake_session import (
     cwe295_clean_session,
     cwe327_all_session,
     cwe327_clean_session,
+    cwe330_srand_time_vuln_session,
+    cwe330_srand_getpid_vuln_session,
+    cwe330_srand_constant_zero_session,
+    cwe330_srand_constant_small_session,
+    cwe330_srand_large_constant_safe_session,
+    cwe330_srand_nonconstant_safe_session,
+    cwe330_srand_intervening_call_safe_session,
+    cwe330_srandom_gettimeofday_vuln_session,
+    cwe330_srand48_constant_session,
+    cwe330_clean_session,
+    cwe330_arm64_srand_time_vuln_session,
+    cwe330_arm64_srand_constant_session,
+    cwe330_arm64_srand_nonconstant_safe_session,
+    cwe330_multi_call_session,
     idiv_register_vuln_session,
     div_memory_vuln_session,
     idiv_checked_session,
@@ -1754,3 +1769,114 @@ class TestCwe732:
         f = findings[0]
         assert f.function == "vuln_chmod"
         assert "0o777" in f.evidence
+
+
+class TestCwe330:
+    def test_flags_srand_seeded_by_time(self) -> None:
+        findings = cwe330.detect(cwe330_srand_time_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 330
+        assert f.symbol == "srand"
+        assert f.function == "seed_prng"
+        assert f.address == hex(0x401168)
+        assert "HIGH" in f.evidence
+        assert "time" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_srand_seeded_by_getpid(self) -> None:
+        findings = cwe330.detect(cwe330_srand_getpid_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "srand"
+        assert "HIGH" in f.evidence
+        assert "getpid" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_srand_zero_constant(self) -> None:
+        findings = cwe330.detect(cwe330_srand_constant_zero_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 330
+        assert f.symbol == "srand"
+        assert "MEDIUM" in f.evidence
+        assert "0x0" in f.evidence
+        # MEDIUM tier still maps to HIGH confidence — the immediate is a literal.
+        assert f.confidence == "high"
+
+    def test_flags_srand_small_constant(self) -> None:
+        findings = cwe330.detect(cwe330_srand_constant_small_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert "MEDIUM" in f.evidence
+        assert "0x2a" in f.evidence  # 42 == 0x2a
+
+    def test_does_not_flag_large_constant_seed(self) -> None:
+        # 0xdeadbeef looks like a build-system literal, not a same-seed mistake.
+        assert (
+            cwe330.detect(cwe330_srand_large_constant_safe_session()) == []
+        )
+
+    def test_does_not_flag_nonconstant_seed(self) -> None:
+        # Seed is a register move from a value we cannot resolve.
+        assert cwe330.detect(cwe330_srand_nonconstant_safe_session()) == []
+
+    def test_does_not_flag_when_intervening_call_clobbers_return(self) -> None:
+        # time() return value is overwritten by puts() before the seed write —
+        # the predictable-source link is broken, so we stay quiet.
+        assert (
+            cwe330.detect(cwe330_srand_intervening_call_safe_session()) == []
+        )
+
+    def test_flags_srandom_seeded_by_gettimeofday(self) -> None:
+        findings = cwe330.detect(cwe330_srandom_gettimeofday_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "srandom"
+        assert "HIGH" in f.evidence
+        assert "gettimeofday" in f.evidence
+
+    def test_flags_srand48_constant(self) -> None:
+        findings = cwe330.detect(cwe330_srand48_constant_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "srand48"
+        assert "MEDIUM" in f.evidence
+        assert "0x1" in f.evidence
+
+    def test_clean_session_no_findings(self) -> None:
+        assert cwe330.detect(cwe330_clean_session()) == []
+
+    def test_does_not_flag_when_no_srand_imported(self) -> None:
+        # clean-baseline has no PRNG seeding imports either.
+        assert cwe330.detect(clean_baseline_session()) == []
+
+    def test_arm64_flags_srand_seeded_by_time(self) -> None:
+        findings = cwe330.detect(cwe330_arm64_srand_time_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 330
+        assert f.symbol == "srand"
+        assert f.address == hex(0x850)
+        assert "HIGH" in f.evidence
+        assert "time" in f.evidence
+
+    def test_arm64_flags_srand_constant_seed(self) -> None:
+        findings = cwe330.detect(cwe330_arm64_srand_constant_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert "MEDIUM" in f.evidence
+        assert "0x0" in f.evidence
+
+    def test_arm64_does_not_flag_nonconstant_seed(self) -> None:
+        assert (
+            cwe330.detect(cwe330_arm64_srand_nonconstant_safe_session()) == []
+        )
+
+    def test_multi_call_only_flags_predictable(self) -> None:
+        findings = cwe330.detect(cwe330_multi_call_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.function == "predictable_seed"
+        assert "HIGH" in f.evidence
+        assert "time" in f.evidence
