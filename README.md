@@ -136,7 +136,7 @@ is, not how severe the bug would be if exploited:
 |---|---|---|
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
-| `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
+| `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-191 (a size argument is produced by an unguarded subtraction but whether the operands actually underflow at runtime is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
@@ -304,9 +304,9 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-197, CWE-252, CWE-295,
-CWE-327, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416, CWE-426, CWE-476, CWE-676,
-and CWE-798 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
+in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-191, CWE-197, CWE-252,
+CWE-295, CWE-327, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416, CWE-426, CWE-476,
+CWE-676, and CWE-798 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
 
@@ -529,6 +529,66 @@ is not a constant string literal**. A literal format such as
 `printf("Hello %s\n", name)` is not flagged; a format built from a buffer or
 variable is. Like CWE-78, the format-argument register is resolved per
 architecture, so this works on x86_64 and AArch64.
+
+### CWE-191 — Integer Underflow (Wrap or Wraparound)
+
+An **unsigned subtraction** whose result is handed to an allocator or copy
+routine as a **size/length** without a preceding bounds check on its operands.
+The canonical C source is `malloc(len - header)` or `memcpy(dst, src, end - start)`:
+when the minuend is smaller than the subtrahend (`len < header`, `end < start`,
+`count - 1` with `count == 0`), the unsigned result wraps to a near-`SIZE_MAX`
+value, so the allocation requests — or the copy moves — an enormous region. This
+underflow-to-overflow primitive is behind a long tail of memory-corruption CVEs.
+
+This is the *narrow, statically-visible* slice of CWE-191. blight does **not**
+attempt the general integer-underflow problem (proving a given subtraction can
+underflow at runtime needs value-range / symbolic analysis that blight keeps out
+of scope — the same reason CWE-190 integer overflow is deferred; see
+[POST_V01.md](POST_V01.md)). Instead it anchors on the fingerprint it can see:
+a subtraction result reaching a *size-consuming sink*. That anchor keeps the
+false-positive rate low — a bare `sub` is everywhere, but a `sub` whose result is
+the size argument of `memcpy` is a security-relevant signal.
+
+This is a PLT-anchored, single-function **backward** scan (the same machinery as
+CWE-122 and CWE-369). The detector finds every call site to a size-consuming
+sink — `malloc` / `alloca` / `valloc` / `pvalloc` (size in arg0), `calloc` /
+`realloc` / `reallocarray` (size in arg1), `memcpy` / `memmove` / `memset` /
+`bcopy` (length in arg2) — resolves that argument's register per architecture
+(`rdi`/`rsi`/`rdx` on x86_64, `x0`/`x1`/`x2` on AArch64), then walks backward:
+
+- if the size register (or a register it was moved from) is the **destination of
+  a subtraction** (`sub eax, esi` on x86_64; `sub w0, w1, w2` on AArch64), the
+  size is a subtraction result → candidate underflow;
+- if an **unsigned-compare guard branch** (`jae`/`jb`/`jbe`/`ja` on x86_64,
+  `b.hs`/`b.lo`/`b.ls`/`b.hi` on AArch64) precedes that subtraction, the operands
+  were bounds-checked → not flagged;
+- if the size register is **reloaded from memory** after the subtraction, the
+  value reaching the sink is the fresh reload, not the subtraction → not flagged.
+
+```bash
+$ blight --binary path/to/elf --checks 191 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [191],
+  "findings": [
+    {
+      "cwe": 191,
+      "function": "alloc_body",
+      "address": "0x401160",
+      "evidence": "size argument to malloc is produced by an unsigned subtraction with no preceding bounds check (possible integer underflow → oversized allocation/copy)",
+      "symbol": "malloc",
+      "confidence": "low"
+    }
+  ]
+}
+```
+
+Reachability and the actual runtime range of the operands are not proven
+statically, so every CWE-191 finding is `low` confidence — it marks a
+*statically-visible* unguarded size-producing subtraction reaching an
+allocation/copy. The detector is architecture-aware on x86_64 and AArch64. It is
+kept distinct from CWE-190 (integer *overflow*): CWE-191 fires only on a
+*subtraction*, never attempting to prove overflow of an addition/multiplication.
 
 ### CWE-197 — Numeric Truncation Error
 

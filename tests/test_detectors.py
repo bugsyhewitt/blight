@@ -10,6 +10,7 @@ from blight.detectors import (
     cwe120,
     cwe122,
     cwe134,
+    cwe191,
     cwe197,
     cwe242,
     cwe252,
@@ -90,6 +91,16 @@ from tests.fake_session import (
     cwe197_arm64_truncated_session,
     cwe197_arm64_fullwidth_safe_session,
     cwe197_multi_call_session,
+    cwe191_malloc_sub_vuln_session,
+    cwe191_memcpy_sub_len_vuln_session,
+    cwe191_sub_guarded_session,
+    cwe191_malloc_constant_size_session,
+    cwe191_aliased_sub_vuln_session,
+    cwe191_size_reloaded_safe_session,
+    cwe191_no_size_sinks_session,
+    cwe191_arm64_malloc_sub_vuln_session,
+    cwe191_arm64_sub_guarded_session,
+    cwe191_multi_call_session,
     free_then_deref_vuln_session,
     free_then_null_assign_session,
     free_then_xor_zero_session,
@@ -1206,6 +1217,70 @@ class TestCwe369:
 
     def test_clean_session_no_findings(self) -> None:
         assert cwe369.detect(cwe369_clean_session()) == []
+
+
+class TestCwe191:
+    """CWE-191 Integer Underflow — PLT-anchored, single-function backward scan:
+    a size argument to an allocator/copy produced by an unguarded subtraction."""
+
+    def test_flags_malloc_size_from_subtraction(self) -> None:
+        findings = cwe191.detect(cwe191_malloc_sub_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 191
+        assert f.symbol == "malloc"
+        assert f.confidence == "low"
+        assert f.address == hex(0x401160)
+        assert "subtraction" in f.evidence
+
+    def test_flags_memcpy_length_from_subtraction(self) -> None:
+        # memcpy's length (arg2 → rdx) is `len - header`, unguarded → underflow.
+        findings = cwe191.detect(cwe191_memcpy_sub_len_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 191
+        assert f.symbol == "memcpy"
+        assert f.address == hex(0x401210)
+
+    def test_guarded_subtraction_not_flagged(self) -> None:
+        # `cmp eax, esi; jb ...` bounds-checks the operands before the sub → safe.
+        assert cwe191.detect(cwe191_sub_guarded_session()) == []
+
+    def test_constant_size_not_flagged(self) -> None:
+        # malloc(0x40) — size is a constant immediate, no subtraction → safe.
+        assert cwe191.detect(cwe191_malloc_constant_size_session()) == []
+
+    def test_flags_through_register_alias(self) -> None:
+        # size = rbx; rbx = rax - rcx → the underflowing sub reaches malloc.
+        findings = cwe191.detect(cwe191_aliased_sub_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "malloc"
+
+    def test_size_reloaded_after_sub_not_flagged(self) -> None:
+        # The size register is reloaded from memory after the sub → the value
+        # reaching malloc is NOT the subtraction result → safe.
+        assert cwe191.detect(cwe191_size_reloaded_safe_session()) == []
+
+    def test_no_size_sinks_no_findings(self) -> None:
+        assert cwe191.detect(cwe191_no_size_sinks_session()) == []
+
+    def test_flags_arm64_malloc_size_from_subtraction(self) -> None:
+        findings = cwe191.detect(cwe191_arm64_malloc_sub_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 191
+        assert f.symbol == "malloc"
+        assert f.address == hex(0x840)
+
+    def test_arm64_guarded_subtraction_not_flagged(self) -> None:
+        # `cmp w1, w2; b.lo ...` before the `sub w0, w1, w2` → guarded, safe.
+        assert cwe191.detect(cwe191_arm64_sub_guarded_session()) == []
+
+    def test_scans_every_call_site(self) -> None:
+        # Two malloc sites: one sized by a subtraction (flag), one by a constant.
+        findings = cwe191.detect(cwe191_multi_call_session())
+        assert len(findings) == 1
+        assert findings[0].address == hex(0x40113A)
 
 
 class TestCwe197:
