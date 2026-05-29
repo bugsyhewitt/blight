@@ -124,6 +124,7 @@ class TestSarifLevelMapping:
 
     @pytest.mark.parametrize("cwe,expected", [
         (78,  "error"),
+        (89,  "error"),
         (120, "error"),
         (134, "error"),
         (242, "warning"),

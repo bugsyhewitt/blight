@@ -511,6 +511,93 @@ def cwe295_clean_session() -> FakeR2Session:
     return FakeR2Session(imports, xrefs={})
 
 
+# --- CWE-89 SQL-injection fixtures -----------------------------------------
+#
+# Pure PLT-lookup detector (same shape as CWE-327 / CWE-295 / CWE-676): the
+# presence of a call to a raw-SQL-execution routine is the finding. No data
+# flow — the call site is where injection lands when the query string is built
+# from untrusted input.
+
+def sqlite3_exec_vuln_session() -> FakeR2Session:
+    """A single sqlite3_exec() call (raw SQL string execution)."""
+    imports = [Import(name="sqlite3_exec", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "run_query", "call sym.imp.sqlite3_exec")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def mysql_query_vuln_session() -> FakeR2Session:
+    """A single mysql_query() call (raw query string execution)."""
+    imports = [Import(name="mysql_query", plt=0x401050)]
+    xrefs = {
+        0x401050: [Xref(0x401172, "CALL", "lookup_user", "call sym.imp.mysql_query")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def pqexec_vuln_session() -> FakeR2Session:
+    """A single PQexec() call (raw libpq command string)."""
+    imports = [Import(name="PQexec", plt=0x401060)]
+    xrefs = {0x401060: [Xref(0x401184, "CALL", "fetch_rows", "call sym.imp.PQexec")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def sqlexecdirect_vuln_session() -> FakeR2Session:
+    """A single SQLExecDirect() call (raw ODBC statement string)."""
+    imports = [Import(name="SQLExecDirect", plt=0x401070)]
+    xrefs = {
+        0x401070: [Xref(0x401196, "CALL", "exec_stmt", "call sym.imp.SQLExecDirect")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def sqlite3_prepare_v2_session() -> FakeR2Session:
+    """A single sqlite3_prepare_v2() call (MEDIUM — gateway to bound params)."""
+    imports = [Import(name="sqlite3_prepare_v2", plt=0x401080)]
+    xrefs = {
+        0x401080: [Xref(0x4011a8, "CALL", "compile_q", "call sym.imp.sqlite3_prepare_v2")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe89_all_session() -> FakeR2Session:
+    """One call to each of five representative CWE-89 routines.
+
+    Includes a safe neighbour (sqlite3_bind_text) that must NOT fire.
+    """
+    imports = [
+        Import(name="sqlite3_exec", plt=0x401040),
+        Import(name="mysql_query", plt=0x401050),
+        Import(name="PQexec", plt=0x401060),
+        Import(name="SQLExecDirect", plt=0x401070),
+        Import(name="sqlite3_prepare_v2", plt=0x401080),
+        Import(name="sqlite3_bind_text", plt=0x4010a0),  # safe API, must not fire
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "run_query", "call sym.imp.sqlite3_exec")],
+        0x401050: [Xref(0x401172, "CALL", "lookup_user", "call sym.imp.mysql_query")],
+        0x401060: [Xref(0x401184, "CALL", "fetch_rows", "call sym.imp.PQexec")],
+        0x401070: [Xref(0x401196, "CALL", "exec_stmt", "call sym.imp.SQLExecDirect")],
+        0x401080: [
+            Xref(0x4011a8, "CALL", "compile_q", "call sym.imp.sqlite3_prepare_v2")
+        ],
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe89_clean_session() -> FakeR2Session:
+    """Only safe parameterised APIs imported — no CWE-89 routine present."""
+    imports = [
+        Import(name="sqlite3_bind_text", plt=0x401040),
+        Import(name="sqlite3_step", plt=0x401050),
+        Import(name="mysql_stmt_bind_param", plt=0x401060),
+        Import(name="PQexecParams", plt=0x401070),
+        Import(name="SQLBindParameter", plt=0x401080),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
 # --- CWE-476 NULL-pointer-dereference fixtures -----------------------------
 #
 # Pattern: an allocator (malloc/calloc/fopen/...) returns a pointer in rax.

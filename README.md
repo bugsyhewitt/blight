@@ -43,13 +43,13 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {78,120,134,242,252,295,327,476,676,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {78,89,120,134,242,252,295,327,476,676,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
-- `--checks` — which CWE check to run; one of `78`, `120`, `134`, `242`, `252`,
-  `295`, `327`, `476`, `676`, or `all` (default: `all`)
+- `--checks` — which CWE check to run; one of `78`, `89`, `120`, `134`, `242`,
+  `252`, `295`, `327`, `476`, `676`, or `all` (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
 - `--output-file FILE` (`-o FILE`) — write the report to `FILE` instead of
@@ -90,7 +90,7 @@ and `findings` list:
 ```json
 {
   "directory": "./firmware/bin",
-  "checks": [78, 120, 134, 242, 252, 295, 327, 476, 676],
+  "checks": [78, 89, 120, 134, 242, 252, 295, 327, 476, 676],
   "results": [
     { "binary": "./firmware/bin/httpd",  "findings": [ /* ... */ ] },
     { "binary": "./firmware/bin/telnetd", "findings": [ /* ... */ ] }
@@ -133,8 +133,8 @@ is, not how severe the bug would be if exploited:
 
 | Confidence | Meaning | Applies to |
 |---|---|---|
-| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-676 (HIGH-severity symbols) |
-| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-78, CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols) |
+| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-89 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-676 (HIGH-severity symbols) |
+| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols) |
 | `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
@@ -233,7 +233,7 @@ show their `error` string instead of findings), followed by a corpus total:
 ```bash
 $ blight --binary ./firmware/bin --checks all --format text
 directory: ./firmware/bin
-checks: 78, 120, 134, 242, 252, 295, 327, 476, 676
+checks: 78, 89, 120, 134, 242, 252, 295, 327, 476, 676
 
   binary: ./firmware/bin/httpd
   1 finding (high: 1, medium: 0, low: 0)
@@ -303,8 +303,8 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-134, CWE-252, CWE-295, CWE-327, CWE-476, and CWE-676 were added
-post-v0.1 (see [POST_V01.md](POST_V01.md)).
+in v0.1; CWE-89, CWE-134, CWE-252, CWE-295, CWE-327, CWE-476, and CWE-676 were
+added post-v0.1 (see [POST_V01.md](POST_V01.md)).
 
 ### CWE-78 — OS Command Injection
 
@@ -328,6 +328,45 @@ $ blight --binary tests/fixtures/system-vuln --checks 78 --format json
       "evidence": "call to system with a non-constant command argument (possible OS command injection)",
       "symbol": "system",
       "confidence": "medium"
+    }
+  ]
+}
+```
+
+### CWE-89 — SQL Injection
+
+Calls to database-client routines that **execute a SQL statement supplied as a
+string** — the sink of every SQL-injection vulnerability. If the query is built
+from untrusted input by concatenation or `sprintf` rather than a
+parameterised/prepared statement, the call is exactly where the injection lands.
+
+This is a pure PLT-lookup check (the same shape as CWE-78, CWE-327, CWE-295 and
+CWE-676): it does **not** read the query argument out of the disassembly — the
+query string arrives in different argument positions across the many database
+libraries and is frequently assembled across basic blocks, so the high-value
+signal "this binary executes raw SQL strings, confirm every call site uses bound
+parameters" is already carried by the presence of the call. Raw-string execution
+sinks (`sqlite3_exec`, `sqlite3_mprintf`/`sqlite3_vmprintf`, `mysql_query`,
+`mysql_real_query`, `PQexec`, `SQLExecDirect`/`SQLExecDirectW`) are `high`
+confidence; the prepare/compile gateways that *can* be used safely with bound
+parameters (`sqlite3_prepare`/`_v2`/`_v3`, `SQLPrepare`) are `medium`. The safe
+parameterised APIs (`sqlite3_bind_*`, `sqlite3_step`, `mysql_stmt_bind_param`,
+`PQexecParams`/`PQprepare`/`PQexecPrepared`, `SQLBindParameter`) are **not**
+flagged. Because it is a pure PLT lookup it is architecture-agnostic.
+
+```bash
+$ blight --binary path/to/elf --checks 89 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [89],
+  "findings": [
+    {
+      "cwe": 89,
+      "function": "lookup_user",
+      "address": "0x401172",
+      "evidence": "[HIGH] call to mysql_query: mysql_query executes a raw query string — use the prepared-statement API (mysql_stmt_prepare + mysql_stmt_bind_param)",
+      "symbol": "mysql_query",
+      "confidence": "high"
     }
   ]
 }

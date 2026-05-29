@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from blight.detectors import (
     cwe78,
+    cwe89,
     cwe120,
     cwe134,
     cwe242,
@@ -25,6 +26,8 @@ from tests.fake_session import (
     clean_baseline_session,
     ctime_vuln_session,
     curl_setopt_vuln_session,
+    cwe89_all_session,
+    cwe89_clean_session,
     cwe252_clean_session,
     cwe295_all_session,
     cwe295_clean_session,
@@ -47,6 +50,11 @@ from tests.fake_session import (
     malloc_deref_vuln_session,
     md5_vuln_session,
     mktemp_vuln_session,
+    mysql_query_vuln_session,
+    pqexec_vuln_session,
+    sqlexecdirect_vuln_session,
+    sqlite3_exec_vuln_session,
+    sqlite3_prepare_v2_session,
     printf_constant_session,
     printf_fmtstr_vuln_session,
     printf_no_dangerous_imports_session,
@@ -333,6 +341,97 @@ class TestCwe327:
     def test_does_not_flag_absent_routine(self) -> None:
         # clean-baseline has none of the CWE-327 routines.
         assert cwe327.detect(clean_baseline_session()) == []
+
+
+class TestCwe89:
+    def test_flags_sqlite3_exec(self) -> None:
+        findings = cwe89.detect(sqlite3_exec_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 89
+        assert f.symbol == "sqlite3_exec"
+        assert f.function == "run_query"
+        assert f.address == hex(0x401160)
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "sqlite3_bind" in f.evidence
+
+    def test_flags_mysql_query(self) -> None:
+        findings = cwe89.detect(mysql_query_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 89
+        assert f.symbol == "mysql_query"
+        assert f.function == "lookup_user"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "prepared-statement" in f.evidence
+
+    def test_flags_pqexec(self) -> None:
+        findings = cwe89.detect(pqexec_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 89
+        assert f.symbol == "PQexec"
+        assert f.function == "fetch_rows"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "PQexecParams" in f.evidence
+
+    def test_flags_sqlexecdirect(self) -> None:
+        findings = cwe89.detect(sqlexecdirect_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 89
+        assert f.symbol == "SQLExecDirect"
+        assert f.function == "exec_stmt"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "SQLBindParameter" in f.evidence
+
+    def test_flags_prepare_v2_medium(self) -> None:
+        # The prepare/compile gateway CAN be used safely with bound parameters,
+        # so it is MEDIUM, not HIGH.
+        findings = cwe89.detect(sqlite3_prepare_v2_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 89
+        assert f.symbol == "sqlite3_prepare_v2"
+        assert f.function == "compile_q"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+        assert "sqlite3_bind" in f.evidence
+
+    def test_flags_all_representative_routines(self) -> None:
+        findings = cwe89.detect(cwe89_all_session())
+        symbols = {f.symbol for f in findings}
+        assert symbols == {
+            "sqlite3_exec",
+            "mysql_query",
+            "PQexec",
+            "SQLExecDirect",
+            "sqlite3_prepare_v2",
+        }
+        for f in findings:
+            assert f.cwe == 89
+            assert f.function
+            assert f.address.startswith("0x")
+            assert f.evidence
+            assert f.confidence in ("high", "medium", "low")
+
+    def test_does_not_flag_safe_bind_api(self) -> None:
+        # cwe89_all imports sqlite3_bind_text but never xrefs it as a call —
+        # and even a call to it must never be flagged: it is the safe pattern.
+        findings = cwe89.detect(cwe89_all_session())
+        assert all(f.symbol != "sqlite3_bind_text" for f in findings)
+
+    def test_clean_session_no_findings(self) -> None:
+        # Only parameterised APIs (bind/step/exec-params) are imported.
+        assert cwe89.detect(cwe89_clean_session()) == []
+
+    def test_does_not_flag_absent_routine(self) -> None:
+        # clean-baseline has none of the CWE-89 routines.
+        assert cwe89.detect(clean_baseline_session()) == []
 
 
 class TestCwe295:
