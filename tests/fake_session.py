@@ -2077,6 +2077,160 @@ def arm64_malloc_strncpy_bounded_session() -> FakeR2Session:
     return FakeR2Session(imports, xrefs, {0x830: build_ops}, arch="arm64")
 
 
+# --- CWE-401 memory-leak fixtures ------------------------------------------
+#
+# Pattern: an allocator (malloc/calloc/strdup/...) returns a heap buffer in rax
+# (x0 on AArch64). A vulnerable case overwrites the ONLY register alias of that
+# pointer with an unrelated value before it is ever freed, stored to memory, or
+# returned — the sole handle is lost, so the buffer can never be freed (leak).
+# Safe cases free the pointer, store it away (escape), return it (caller owns
+# it), or pass it to another call (ownership ambiguous).
+
+
+def malloc_clobbered_leak_vuln_session() -> FakeR2Session:
+    """malloc() result clobbered in rax by a fresh value, unfreed (vulnerable)."""
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "leaky", "call sym.imp.malloc")]}
+    # rax = malloc(16); ...; rax = 0  -> the only handle is overwritten, no free.
+    leaky_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0x10"),
+        Instruction(0x401150, "call sym.imp.malloc"),       # rax = heap buffer
+        Instruction(0x401155, "mov eax, 0"),                # clobber sole handle
+        Instruction(0x40115a, "leave"),
+        Instruction(0x40115b, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: leaky_ops})
+
+
+def strdup_clobbered_leak_vuln_session() -> FakeR2Session:
+    """strdup() result aliased to rbx, then rbx reloaded from memory (leak).
+
+    Exercises alias propagation: rbx = rax, then rax reloaded (still aliased via
+    rbx), then rbx clobbered too → last handle lost, unfreed."""
+    imports = [Import(name="strdup", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "dup_it", "call sym.imp.strdup")]}
+    dup_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.strdup"),       # rax = heap buffer
+        Instruction(0x401155, "mov rbx, rax"),              # alias: rbx = ptr
+        Instruction(0x401158, "mov rax, qword [rbp - 0x8]"),  # rax clobbered (rbx alive)
+        Instruction(0x40115c, "mov rbx, qword [rbp - 0x10]"),  # last handle lost
+        Instruction(0x401160, "leave"),
+        Instruction(0x401161, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: dup_ops})
+
+
+def malloc_freed_session() -> FakeR2Session:
+    """malloc() result freed before being lost — must NOT flag."""
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="free", plt=0x401050),
+    ]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "ok", "call sym.imp.malloc")]}
+    ok_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.malloc"),       # rax = heap buffer
+        Instruction(0x401155, "mov rdi, rax"),              # arg0 = ptr
+        Instruction(0x401158, "call sym.imp.free"),         # released → no leak
+        Instruction(0x40115d, "mov eax, 0"),
+        Instruction(0x401162, "leave"),
+        Instruction(0x401163, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ok_ops})
+
+
+def malloc_stored_escapes_leak_session() -> FakeR2Session:
+    """malloc() result stored to the stack (escapes) — conservatively NOT flagged."""
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "store_it", "call sym.imp.malloc")]}
+    store_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.malloc"),       # rax = heap buffer
+        Instruction(0x401155, "mov qword [rbp - 0x8], rax"),  # escapes our view
+        Instruction(0x40115d, "mov eax, 0"),
+        Instruction(0x401162, "leave"),
+        Instruction(0x401163, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: store_ops})
+
+
+def malloc_returned_session() -> FakeR2Session:
+    """malloc() result left in rax at ret (returned to caller) — must NOT flag."""
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "make", "call sym.imp.malloc")]}
+    make_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.malloc"),       # rax = heap buffer
+        Instruction(0x401155, "leave"),
+        Instruction(0x401156, "ret"),                       # ptr returned in rax
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: make_ops})
+
+
+def malloc_passed_to_call_session() -> FakeR2Session:
+    """malloc() result passed to another call (ownership ambiguous) — NOT flagged."""
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="init_obj", plt=0x401050),
+    ]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "build", "call sym.imp.malloc")]}
+    build_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401150, "call sym.imp.malloc"),       # rax = heap buffer
+        Instruction(0x401155, "mov rdi, rax"),              # arg0 = ptr
+        Instruction(0x401158, "call sym.imp.init_obj"),     # callee may take ownership
+        Instruction(0x40115d, "mov eax, 0"),
+        Instruction(0x401162, "leave"),
+        Instruction(0x401163, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: build_ops})
+
+
+def cwe401_no_allocator_imports_session() -> FakeR2Session:
+    """A session with no heap-allocator imports — nothing to flag."""
+    imports = [
+        Import(name="free", plt=0x401030),
+        Import(name="puts", plt=0x401040),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
+def arm64_malloc_clobbered_leak_vuln_session() -> FakeR2Session:
+    """AArch64: malloc() result (x0) clobbered by `mov w0, 0`, unfreed (leak)."""
+    imports = [Import(name="malloc", plt=0x710)]
+    xrefs = {0x710: [Xref(0x83c, "CALL", "leaky", "bl sym.imp.malloc")]}
+    leaky_ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x10]!"),
+        Instruction(0x838, "mov w0, 0x10"),
+        Instruction(0x83c, "bl sym.imp.malloc"),            # x0 = heap buffer
+        Instruction(0x840, "mov w0, 0"),                    # clobber sole handle
+        Instruction(0x844, "ldp x29, x30, [sp], 0x10"),
+        Instruction(0x848, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: leaky_ops}, arch="arm64")
+
+
+def arm64_malloc_freed_session() -> FakeR2Session:
+    """AArch64: malloc() result (x0) freed before being lost — must NOT flag."""
+    imports = [
+        Import(name="malloc", plt=0x710),
+        Import(name="free", plt=0x720),
+    ]
+    xrefs = {0x710: [Xref(0x83c, "CALL", "ok", "bl sym.imp.malloc")]}
+    ok_ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x10]!"),
+        Instruction(0x838, "mov w0, 0x10"),
+        Instruction(0x83c, "bl sym.imp.malloc"),            # x0 = heap buffer
+        Instruction(0x840, "bl sym.imp.free"),              # x0 still ptr → released
+        Instruction(0x844, "mov w0, 0"),
+        Instruction(0x848, "ldp x29, x30, [sp], 0x10"),
+        Instruction(0x84c, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ok_ops}, arch="arm64")
+
+
 def cwe798_all_session() -> FakeR2Session:
     """A mix of every CWE-798 signal in one binary, plus benign neighbours."""
     return _strings_session(
