@@ -133,7 +133,7 @@ is, not how severe the bug would be if exploited:
 
 | Confidence | Meaning | Applies to |
 |---|---|---|
-| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-676 (HIGH-severity symbols) |
+| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols) |
 | `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-676 (LOW-severity symbols) |
 
@@ -303,8 +303,8 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-22, CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-476,
-and CWE-676 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
+in v0.1; CWE-22, CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-426,
+CWE-476, and CWE-676 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
 
@@ -588,6 +588,59 @@ The confidence mirrors the per-symbol severity (HIGH→`high`, MEDIUM→`medium`
 the same policy as CWE-676. Because it is a pure PLT lookup it is
 architecture-agnostic and works on every architecture radare2 can disassemble.
 
+### CWE-426 — Untrusted Search Path
+
+Calls to routines that resolve a **program** or a **shared object** by walking
+an externally controllable search path — `$PATH` for process launchers, the
+dynamic-loader search path (`LD_LIBRARY_PATH`, `DT_RUNPATH`/`DT_RPATH`,
+`$ORIGIN`, the current working directory) for library loaders. The weakness is
+the *resolution mechanism*, not the argument: even a perfectly constant name
+(`dlopen("libfoo.so")`, `execvp("ls", …)`) can be hijacked by an attacker who
+controls the search path — a planted `libfoo.so` in the CWD, a malicious `ls`
+earlier in `$PATH`, or a writable `rpath` directory all redirect the call to
+attacker code.
+
+This is the complement of [CWE-78](#cwe-78--os-command-injection): CWE-78
+inspects the command *argument* to decide whether it is non-constant
+(injection), whereas CWE-426 flags the *search-path resolution itself*
+regardless of constness. A single `system(buf)` call site can therefore carry
+**both** findings, and an `execvp("ls", …)` call site can carry a CWE-426
+finding without a CWE-78 one. Like CWE-327 and CWE-676 it is a pure PLT-lookup
+check — any matching call site is flagged and the severity is surfaced in the
+evidence string.
+
+| Mechanism | Symbols | Severity | Why it's flagged | Use instead |
+|---|---|---|---|---|
+| Dynamic-loader search path | `dlopen`, `dlmopen` | HIGH | A bare-name load walks `LD_LIBRARY_PATH`/`rpath`/`$ORIGIN` | Load by absolute path |
+| `$PATH`-searching exec | `execlp`, `execvp`, `execvpe` | HIGH | The trailing `p` resolves the program via `$PATH` | `execv`/`execve` with an absolute path |
+| Shell launchers | `popen`, `system` | HIGH | Both run `/bin/sh -c`, resolving the program via `$PATH` | Absolute path + sanitised environment |
+
+The explicit-path exec forms (`execl`, `execv`, `execle`, `execve`) take a full
+pathname and do **not** consult `$PATH`, so they are deliberately **not**
+flagged — they are the recommended replacement.
+
+```bash
+$ blight --binary path/to/elf --checks 426 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [426],
+  "findings": [
+    {
+      "cwe": 426,
+      "function": "load_plugin",
+      "address": "0x401160",
+      "evidence": "[HIGH] call to dlopen: dlopen() resolves a bare name via LD_LIBRARY_PATH/rpath/$ORIGIN; load shared objects by absolute path",
+      "symbol": "dlopen",
+      "confidence": "high"
+    }
+  ]
+}
+```
+
+The confidence mirrors the per-symbol severity (HIGH→`high`), the same policy as
+CWE-327 and CWE-676. Because it is a pure PLT lookup it is architecture-agnostic
+and works on every architecture radare2 can disassemble.
+
 ### CWE-476 — NULL Pointer Dereference
 
 Pointers returned by a *nullable allocator* — `malloc`, `calloc`, `realloc`,
@@ -704,8 +757,8 @@ $ blight --binary path/to/elf --checks 676 --format json
 
 `blight` supports **x86_64** and **AArch64 (arm64)** ELF binaries.
 
-The CWE-22, CWE-89, CWE-119, CWE-120, CWE-242, CWE-295, CWE-327, and CWE-676
-detectors flag any call site to a dangerous symbol and are therefore architecture-agnostic
+The CWE-22, CWE-89, CWE-119, CWE-120, CWE-242, CWE-295, CWE-327, CWE-426, and
+CWE-676 detectors flag any call site to a dangerous symbol and are therefore architecture-agnostic
 — they work on every architecture radare2 can disassemble. The CWE-78 and CWE-134 detectors inspect
 the register that carries a specific argument (the command string, the format
 string), and CWE-476 and CWE-252 inspect the *return* register (`rax`/`x0`) plus

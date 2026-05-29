@@ -14,6 +14,7 @@ Severity mapping (no severity field on Finding — derived from CWE class):
   CWE-242 (Use of Inherently Dangerous)  → MEDIUM → "warning"
   CWE-295 (Improper Certificate Valid.)  → HIGH  → "error"
   CWE-327 (Broken/Risky Cryptography)    → HIGH  → "error"
+  CWE-426 (Untrusted Search Path)        → HIGH  → "error"
   CWE-676 (Use of Potentially Dangerous) → MEDIUM → "warning"
   unknown                                → "note"
 """
@@ -43,6 +44,7 @@ _CWE_META: dict[int, tuple[str, str]] = {
     242: ("Use of Inherently Dangerous Function", "warning"),
     295: ("Improper Certificate Validation", "error"),
     327: ("Use of a Broken or Risky Cryptographic Algorithm", "error"),
+    426: ("Untrusted Search Path", "error"),
     676: ("Use of Potentially Dangerous Function", "warning"),
 }
 
