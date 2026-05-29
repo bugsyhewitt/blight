@@ -214,6 +214,44 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **CWE-415 — Double Free** (post-backlog; the narrower sibling of CWE-416,
+  sharing its single-function alias-tracking machinery).
+  `src/blight/detectors/cwe415.py` flags the statically-detectable double-free:
+  a pointer passed to `free`/`cfree` (the dangling-pointer source, carried in
+  the first-argument register — `rdi` on x86_64, `x0` on AArch64) that is then
+  passed to `free` **a second time without being reassigned** in between.
+  Releasing the same storage twice corrupts the allocator's free-list and is a
+  classic heap-exploitation primitive. Chosen over CWE-190 (integer overflow):
+  POST_V01 records — repeatedly — that CWE-190 requires symbolic execution /
+  value-range analysis that is out of scope for blight's static
+  PLT-and-disassembly approach, whereas double-free is the *same* in-function
+  forward-scan-with-register-alias-tracking shape already proven by the shipped
+  CWE-416 detector, so it lands as a small, infrastructure-free PR. The detector
+  seeds the alias set with the first-argument register at the `free` call site
+  and scans forward in the same function: a reassignment of a live alias
+  (`mov rdi, 0` / `xor rdi, rdi` / `mov x0, 0`, a `lea` of a fresh address, or a
+  reload from an unrelated source) kills the dangling alias — the canonical
+  `ptr = NULL;` after `free(ptr)` — and suppresses the finding; a
+  register-to-register move propagates the alias so a `free` of the copy is
+  still caught; a *second* `free`/`cfree` reached while the first-argument
+  register still holds a live alias is flagged. Deliberately distinct from
+  CWE-416: a generic *non-deallocator* use of the freed pointer is NOT flagged
+  here (that is CWE-416's signal), keeping the two detectors crisply separated.
+  `realloc` is excluded for the same reason as in CWE-416. Architecture-aware on
+  x86_64 and AArch64 (POST_V01 item 5), resolved through the shared
+  `_argregs.arg_register_aliases` table. Because the reachability of the second
+  free along the freed path is not proven statically, every CWE-415 finding is
+  `low` confidence, matching CWE-416 / CWE-476 / CWE-252 policy. Registered as
+  check `415`, so the `--checks {…,415,all}` token and the `all` set wire in
+  automatically through the `DETECTORS` dispatch dict; SARIF maps CWE-415 to
+  level `error`. 10 new unit tests (`tests/test_detectors.py::TestCwe415`)
+  covering the direct double-free, the alias-propagated double-free, the
+  `ptr=NULL`/`xor`-between safe cases, the single-free and non-deallocator-use
+  safe cases, the no-`free`-import / clean-baseline negatives, and the AArch64
+  vuln + safe pair; the `--checks all` (`test_cli`) and SARIF level-mapping
+  (`test_sarif`) assertions were updated to include `415`. Unit test count
+  345 → 357.
+
 - **CWE-416 — Use After Free** (post-backlog; the third single-function
   taint-propagation detector, after CWE-476 and CWE-252).
   `src/blight/detectors/cwe416.py` flags the most common statically-detectable

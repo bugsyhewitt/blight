@@ -136,7 +136,7 @@ is, not how severe the bug would be if exploited:
 |---|---|---|
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
-| `low` | The pattern is weakly indicative. | CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-676 (LOW-severity symbols) |
+| `low` | The pattern is weakly indicative. | CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
@@ -305,8 +305,8 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
 in v0.1; CWE-22, CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-362,
-CWE-369, CWE-416, CWE-426, CWE-476, CWE-676, and CWE-798 were added post-v0.1
-(see [POST_V01.md](POST_V01.md)).
+CWE-369, CWE-415, CWE-416, CWE-426, CWE-476, CWE-676, and CWE-798 were added
+post-v0.1 (see [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
 
@@ -706,6 +706,59 @@ confidence — it marks an *unchecked* divisor, the statically-visible signal. T
 function is reported by its entry address (radare2's `aflj` carries the offset,
 not a resolved name, for this anchorless check). The detector is architecture-
 aware on x86_64 and AArch64.
+
+### CWE-415 — Double Free
+
+A pointer is passed to `free` (the deallocation that makes it dangling) and the
+**same pointer is then passed to `free` a second time in the same function
+without first being reassigned** (set to `NULL`, zeroed, or reloaded with a fresh
+value). Releasing the same storage twice corrupts the allocator's free-list
+bookkeeping and is a well-known path to heap exploitation.
+
+This is the narrower sibling of [CWE-416](#cwe-416--use-after-free): both seed an
+alias set with the first-argument register (`rdi` on x86_64, `x0` on AArch64)
+that carries the freed pointer at the `free` call site, then scan forward through
+the function. Where CWE-416's sink is *any* later read of the dangling pointer,
+CWE-415's sink is specifically a **second deallocation** of it:
+
+- a **reassignment** of a live alias — `mov rdi, 0` / `xor rdi, rdi` (x86_64),
+  `mov x0, 0` (AArch64), a `lea` of a fresh address, or a reload from an
+  unrelated source — kills the dangling alias (the canonical `ptr = NULL;` after
+  `free(ptr)`) and **suppresses** the finding;
+- a register-to-register move (`mov rbx, rdi`; later `mov rdi, rbx`)
+  **propagates** the dangling alias, so a `free` of the propagated register is
+  still caught;
+- a **second `free`/`cfree`** reached while the first-argument register still
+  holds a live alias is flagged as a double-free;
+- a generic *non-deallocator* use of the freed pointer (e.g. `puts(ptr)`) is
+  **not** flagged here — that is CWE-416's signal, keeping the two detectors
+  crisply separated.
+
+Only the unambiguous deallocators `free`/`cfree` are tracked; `realloc` is
+excluded for the same reason as in CWE-416.
+
+```bash
+$ blight --binary path/to/elf --checks 415 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [415],
+  "findings": [
+    {
+      "cwe": 415,
+      "function": "dbl_free",
+      "address": "0x401150",
+      "evidence": "pointer freed by free is passed to a second free in the same function without being reassigned (possible double-free)",
+      "symbol": "free",
+      "confidence": "low"
+    }
+  ]
+}
+```
+
+Because the reachability of the second free along the freed path is not proven
+statically (an intervening branch this linear scan cannot see may reassign the
+pointer), every CWE-415 finding is `low` confidence. The detector is
+architecture-aware on x86_64 and AArch64.
 
 ### CWE-416 — Use After Free
 
