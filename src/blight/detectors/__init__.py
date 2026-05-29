@@ -15,7 +15,19 @@ from collections.abc import Callable
 from blight.findings import Finding
 from blight.r2 import R2Session
 
-from . import cwe78, cwe89, cwe120, cwe134, cwe242, cwe252, cwe295, cwe327, cwe476, cwe676
+from . import (
+    cwe78,
+    cwe89,
+    cwe119,
+    cwe120,
+    cwe134,
+    cwe242,
+    cwe252,
+    cwe295,
+    cwe327,
+    cwe476,
+    cwe676,
+)
 
 Detector = Callable[[R2Session], list[Finding]]
 
@@ -23,6 +35,7 @@ Detector = Callable[[R2Session], list[Finding]]
 DETECTORS: dict[int, Detector] = {
     78: cwe78.detect,
     89: cwe89.detect,
+    119: cwe119.detect,
     120: cwe120.detect,
     134: cwe134.detect,
     242: cwe242.detect,

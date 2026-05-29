@@ -210,6 +210,43 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **CWE-119 — Improper Restriction of Operations within the Bounds of a Memory
+  Buffer** (post-backlog; new static-analysis detector). `src/blight/detectors/cwe119.py`
+  flags call sites to the memory-copy / concatenation primitives whose safe use
+  depends entirely on the caller having computed a correct size bound — the
+  broader memory-bounds class that complements CWE-120's unchecked-copy set
+  (`strcpy`/`sprintf`/`gets`). Covered: the explicit-length copies
+  `memcpy`/`memmove`/`bcopy` (HIGH — a wrong/attacker-influenced length is the
+  canonical out-of-bounds write), the unbounded copies `stpcpy`/`wcscpy` and
+  unbounded concatenations `strcat`/`wcscat` (HIGH — no size argument at all;
+  CWE-120 deliberately omits `strcat`, which belongs to this class), and the
+  count-bounded-but-routinely-misused routines `strncat`/`wcsncat` (MEDIUM — the
+  count is source-relative, NOT destination-space-remaining, plus the implicit
+  NUL terminator) and `alloca` (MEDIUM — a caller-sized stack allocation is a
+  stack-clash primitive). The *safe* bounded forms (`strlcpy`, `strlcat`,
+  `snprintf`, `memset`) are deliberately **not** flagged — they are the
+  recommended pattern and flagging them would invert the signal. Like CWE-89,
+  CWE-327, CWE-295 and CWE-676 it is a *pure PLT-lookup* detector built on the
+  existing `_common.call_sites` helper: it deliberately does **not** read the
+  length argument out of the disassembly to prove it is non-constant (the size
+  arrives in different registers across the functions and is frequently computed
+  across basic blocks, so per-function/per-architecture data flow would buy
+  marginal precision), so the call to a memory-bounds-sensitive routine is itself
+  the finding, surfaced at the per-symbol confidence (HIGH→`high`,
+  MEDIUM→`medium`) in the evidence string for triage. Zero new infrastructure,
+  architecture-agnostic (works on every arch radare2 can disassemble). Registered
+  as check `119`, so the `--checks {…,119,…,all}` token and the `all` set wire in
+  automatically through the `DETECTORS` dispatch dict; SARIF maps CWE-119 to level
+  `error`. Chosen as the next improvement because the entire ranked backlog
+  (items 1-8) plus every CLI/output-layer item and the CWE-78/89/327/295 families
+  had already shipped — the memory-corruption class (overflows via raw/bounded
+  copies) is the highest-value remaining gap and the most tractable for blight's
+  PLT-level approach (path-traversal/TOCTOU candidates need fragile argument or
+  call-sequence data flow), making it the natural extension of the existing
+  CWE-120 unchecked-copy detector. 10 new unit tests
+  (`tests/test_detectors.py::TestCwe119`); the `--checks all` and scan-fixture
+  assertions were updated to include `119`. Test count 274 → 284.
+
 - **CWE-89 — SQL Injection** (post-backlog; new static-analysis heuristic).
   `src/blight/detectors/cwe89.py` flags call sites to database-client routines
   that execute a SQL statement supplied as a string — the *sink* of every

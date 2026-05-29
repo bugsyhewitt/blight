@@ -7,6 +7,7 @@ a result referencing that rule.
 Severity mapping (no severity field on Finding — derived from CWE class):
   CWE-78  (OS Command Injection)         → HIGH  → "error"
   CWE-89  (SQL Injection)                → HIGH  → "error"
+  CWE-119 (Memory-Bounds Restriction)    → HIGH  → "error"
   CWE-120 (Buffer Copy w/o Size Check)   → HIGH  → "error"
   CWE-134 (Uncontrolled Format String)   → HIGH  → "error"
   CWE-242 (Use of Inherently Dangerous)  → MEDIUM → "warning"
@@ -34,6 +35,7 @@ _INFORMATION_URI = "https://github.com/bugsyhewitt/blight"
 _CWE_META: dict[int, tuple[str, str]] = {
     78:  ("OS Command Injection", "error"),
     89:  ("SQL Injection", "error"),
+    119: ("Improper Restriction of Operations within the Bounds of a Memory Buffer", "error"),
     120: ("Buffer Copy without Checking Size of Input", "error"),
     134: ("Uncontrolled Format String", "error"),
     242: ("Use of Inherently Dangerous Function", "warning"),

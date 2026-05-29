@@ -43,7 +43,8 @@ def build_parser() -> argparse.ArgumentParser:
         prog="blight",
         description=(
             "Python-native CWE pattern detector for ELF binaries, driving "
-            "radare2 via r2pipe. Detects CWE-78, CWE-120, and CWE-242."
+            "radare2 via r2pipe. Detects CWE-78, CWE-89, CWE-119, CWE-120, "
+            "CWE-134, CWE-242, CWE-252, CWE-295, CWE-327, CWE-476, and CWE-676."
         ),
     )
     parser.add_argument(
