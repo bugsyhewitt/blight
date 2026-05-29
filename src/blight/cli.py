@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
             "radare2 via r2pipe. Detects CWE-22, CWE-78, CWE-89, CWE-119, "
             "CWE-120, CWE-122, CWE-134, CWE-191, CWE-197, CWE-242, CWE-252, "
             "CWE-295, CWE-327, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416, "
-            "CWE-426, CWE-476, CWE-676, and CWE-798."
+            "CWE-426, CWE-476, CWE-676, CWE-732, and CWE-798."
         ),
     )
     parser.add_argument(

@@ -57,6 +57,7 @@ _CWE_META: dict[int, tuple[str, str]] = {
     416: ("Use After Free", "error"),
     426: ("Untrusted Search Path", "error"),
     676: ("Use of Potentially Dangerous Function", "warning"),
+    732: ("Incorrect Permission Assignment for Critical Resource", "error"),
     798: ("Use of Hard-coded Credentials", "error"),
 }
 

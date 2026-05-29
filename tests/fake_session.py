@@ -2619,3 +2619,253 @@ def cwe197_multi_call_session() -> FakeR2Session:
         xrefs=xrefs,
         functions={0x401152: trunc_ops, 0x401252: safe_ops},
     )
+
+
+# --- CWE-732 incorrect-permission-assignment fixtures ----------------------
+#
+# Pattern: a chmod/fchmod/mkdir/creat/fchmodat/mkdirat call where the *constant*
+# mode operand grants world-writable permissions. The detector inspects the
+# instruction that last writes the mode-arg register before the call and parses
+# its immediate. Per-architecture register naming is resolved via
+# :mod:`blight.detectors._argregs`.
+
+def cwe732_chmod_world_writable_vuln_session() -> FakeR2Session:
+    """x86_64: chmod(path, 0o777) — 0o777 = 0x1ff, world-writable (vulnerable)."""
+    imports = [Import(name="chmod", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "open_world", "call sym.imp.chmod")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "lea rdi, str.tmp_file"),     # path = arg0
+        Instruction(0x401148, "mov esi, 0x1ff"),            # mode = 0o777
+        Instruction(0x401160, "call sym.imp.chmod"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe732_fchmod_world_writable_vuln_session() -> FakeR2Session:
+    """x86_64: fchmod(fd, 0o666) — 0o666 = 0x1b6, world-writable (vulnerable)."""
+    imports = [Import(name="fchmod", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "open_fd", "call sym.imp.fchmod")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0x3"),              # fd = 3
+        Instruction(0x401148, "mov esi, 0x1b6"),            # mode = 0o666
+        Instruction(0x401160, "call sym.imp.fchmod"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe732_chmod_setuid_vuln_session() -> FakeR2Session:
+    """x86_64: chmod(path, 0o4777) — setuid + world-writable (HIGH severity)."""
+    imports = [Import(name="chmod", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "ship_helper", "call sym.imp.chmod")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "lea rdi, str.helper"),
+        Instruction(0x401148, "mov esi, 0x9ff"),            # 0o4777 = 0x9ff
+        Instruction(0x401160, "call sym.imp.chmod"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe732_chmod_safe_mode_session() -> FakeR2Session:
+    """x86_64: chmod(path, 0o644) — typical safe mode (must NOT fire)."""
+    imports = [Import(name="chmod", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "ship_doc", "call sym.imp.chmod")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "lea rdi, str.config"),
+        Instruction(0x401148, "mov esi, 0x1a4"),            # 0o644 = 0x1a4
+        Instruction(0x401160, "call sym.imp.chmod"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe732_mkdir_world_writable_vuln_session() -> FakeR2Session:
+    """x86_64: mkdir(path, 0o777) — world-writable directory (vulnerable)."""
+    imports = [Import(name="mkdir", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "make_tmp", "call sym.imp.mkdir")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "lea rdi, str.tmpdir"),
+        Instruction(0x401148, "mov esi, 0x1ff"),            # 0o777
+        Instruction(0x401160, "call sym.imp.mkdir"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe732_creat_world_writable_vuln_session() -> FakeR2Session:
+    """x86_64: creat(path, 0o666) — newly created file is world-writable."""
+    imports = [Import(name="creat", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "spool", "call sym.imp.creat")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "lea rdi, str.spoolfile"),
+        Instruction(0x401148, "mov esi, 0x1b6"),            # 0o666
+        Instruction(0x401160, "call sym.imp.creat"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe732_fchmodat_world_writable_vuln_session() -> FakeR2Session:
+    """x86_64: fchmodat(dirfd, path, 0o777, 0) — mode at arg2 (rdx)."""
+    imports = [Import(name="fchmodat", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "loosen", "call sym.imp.fchmodat")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0xffffff9c"),        # AT_FDCWD
+        Instruction(0x401145, "lea rsi, str.target"),
+        Instruction(0x40114c, "mov edx, 0x1ff"),             # mode arg2 = 0o777
+        Instruction(0x401152, "xor ecx, ecx"),               # flags = 0
+        Instruction(0x401160, "call sym.imp.fchmodat"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe732_mkdirat_world_writable_vuln_session() -> FakeR2Session:
+    """x86_64: mkdirat(dirfd, path, 0o777) — mode at arg2 (rdx)."""
+    imports = [Import(name="mkdirat", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "build_tree", "call sym.imp.mkdirat")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0xffffff9c"),
+        Instruction(0x401145, "lea rsi, str.subdir"),
+        Instruction(0x40114c, "mov edx, 0x1ff"),
+        Instruction(0x401160, "call sym.imp.mkdirat"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe732_chmod_nonconstant_session() -> FakeR2Session:
+    """x86_64: chmod(path, mode_from_var) — mode is a register move, not a
+    bare immediate. The detector is precision-first and must NOT flag.
+    """
+    imports = [Import(name="chmod", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "apply_mode", "call sym.imp.chmod")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "lea rdi, str.target"),
+        Instruction(0x401148, "mov esi, eax"),               # mode from a var
+        Instruction(0x401160, "call sym.imp.chmod"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe732_mkdir_safe_mode_session() -> FakeR2Session:
+    """x86_64: mkdir(path, 0o755) — typical safe directory mode (must NOT fire)."""
+    imports = [Import(name="mkdir", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "make_cfgdir", "call sym.imp.mkdir")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "lea rdi, str.cfg_dir"),
+        Instruction(0x401148, "mov esi, 0x1ed"),            # 0o755 = 0x1ed
+        Instruction(0x401160, "call sym.imp.mkdir"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe732_clean_session() -> FakeR2Session:
+    """No permission-setting imports — nothing for CWE-732 to anchor on."""
+    imports = [
+        Import(name="puts", plt=0x401030),
+        Import(name="strlen", plt=0x401040),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
+def cwe732_arm64_chmod_world_writable_vuln_session() -> FakeR2Session:
+    """AArch64: chmod(path, 0o777) — mode in w1, immediate via `mov w1, 0x1ff`."""
+    imports = [Import(name="chmod", plt=0x710)]
+    xrefs = {0x710: [Xref(0x840, "CALL", "open_world", "bl sym.imp.chmod")]}
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x834, "adrp x0, 0x1000"),               # path arg0
+        Instruction(0x838, "add x0, x0, 0x10"),
+        Instruction(0x83c, "mov w1, 0x1ff"),                 # mode = 0o777
+        Instruction(0x840, "bl sym.imp.chmod"),
+        Instruction(0x844, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x848, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe732_arm64_chmod_safe_mode_session() -> FakeR2Session:
+    """AArch64: chmod(path, 0o644) — safe mode (must NOT fire)."""
+    imports = [Import(name="chmod", plt=0x710)]
+    xrefs = {0x710: [Xref(0x840, "CALL", "ship_doc", "bl sym.imp.chmod")]}
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x834, "adrp x0, 0x1000"),
+        Instruction(0x838, "add x0, x0, 0x20"),
+        Instruction(0x83c, "mov w1, 0x1a4"),                 # 0o644
+        Instruction(0x840, "bl sym.imp.chmod"),
+        Instruction(0x844, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x848, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe732_multi_call_session() -> FakeR2Session:
+    """Two chmod sites: one world-writable (flag), one 0o644 (skip)."""
+    imports = [Import(name="chmod", plt=0x401040)]
+    xrefs = {
+        0x401040: [
+            Xref(0x401160, "CALL", "vuln_chmod", "call sym.imp.chmod"),
+            Xref(0x401260, "CALL", "safe_chmod", "call sym.imp.chmod"),
+        ]
+    }
+    vuln_ops = [
+        Instruction(0x401140, "lea rdi, str.world_file"),
+        Instruction(0x401148, "mov esi, 0x1ff"),             # 0o777 → flag
+        Instruction(0x401160, "call sym.imp.chmod"),
+        Instruction(0x401165, "ret"),
+    ]
+    safe_ops = [
+        Instruction(0x401240, "lea rdi, str.safe_file"),
+        Instruction(0x401248, "mov esi, 0x1a4"),             # 0o644 → skip
+        Instruction(0x401260, "call sym.imp.chmod"),
+        Instruction(0x401265, "ret"),
+    ]
+    return FakeR2Session(
+        imports, xrefs, {0x401140: vuln_ops, 0x401240: safe_ops}
+    )

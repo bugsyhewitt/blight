@@ -43,14 +43,14 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {22,78,89,119,120,122,134,197,242,252,295,327,362,369,401,415,416,426,476,676,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {22,78,89,119,120,122,134,197,242,252,295,327,362,369,401,415,416,426,476,676,732,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
 - `--checks` — which CWE check to run; one of `22`, `78`, `89`, `119`, `120`,
   `122`, `134`, `197`, `242`, `252`, `295`, `327`, `362`, `369`, `401`, `415`,
-  `416`, `426`, `476`, `676`, `798`, or `all` (default: `all`)
+  `416`, `426`, `476`, `676`, `732`, `798`, or `all` (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
 - `--output-file FILE` (`-o FILE`) — write the report to `FILE` instead of
@@ -134,7 +134,7 @@ is, not how severe the bug would be if exploited:
 
 | Confidence | Meaning | Applies to |
 |---|---|---|
-| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
+| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols), CWE-732 (parsed constant world-writable mode), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
 | `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-191 (a size argument is produced by an unguarded subtraction but whether the operands actually underflow at runtime is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
 
@@ -306,7 +306,7 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
 in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-191, CWE-197, CWE-252,
 CWE-295, CWE-327, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416, CWE-426, CWE-476,
-CWE-676, and CWE-798 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
+CWE-676, CWE-732, and CWE-798 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
 
@@ -1209,6 +1209,53 @@ $ blight --binary path/to/elf --checks 676 --format json
       "address": "0x401160",
       "evidence": "[HIGH] call to tmpnam: Use of tmpnam() has race condition; use mkstemp()",
       "symbol": "tmpnam",
+      "confidence": "high"
+    }
+  ]
+}
+```
+
+### CWE-732 — Incorrect Permission Assignment for Critical Resource
+
+Calls to `chmod` / `fchmod` / `fchmodat` / `mkdir` / `mkdirat` / `creat` with
+a **constant** mode operand that grants world-writable permissions. The
+embedded `0o777` / `0o666` mistake is the canonical CWE-732 pattern in audited
+firmware — the binary ships with the over-permissive mode every time it runs.
+A safe mode such as `0o644` or `0o755` is **not** flagged; a non-constant
+mode (a register or memory operand reaching the mode position) is also
+**not** flagged here — the detector is precision-first and exists to catch
+the literal-immediate misconfiguration, not every dynamic chmod.
+
+The detector is a hybrid: PLT lookup locates the call sites, then per-
+architecture argument-register inspection (the same machinery as CWE-78 and
+CWE-134) parses the immediate that last writes the mode register. The mode
+register varies by symbol — `chmod`/`fchmod`/`mkdir`/`creat` carry mode at
+arg1; `fchmodat`/`mkdirat` carry mode at arg2 — so the detector consults a
+per-symbol arg-index table before reading the register convention. x86_64
+and AArch64 are supported.
+
+| Mode pattern | Severity | Why it's flagged |
+|---|---|---|
+| `mode & 0o6000` set AND world-writable (e.g. `0o4777`) | HIGH | Setuid/setgid binary world-writable — full privilege-escalation primitive |
+| World-writable (`mode & 0o002`), no suid/sgid (e.g. `0o777`, `0o666`) | MEDIUM | Any user on the system can write to the resource |
+
+Both tiers are emitted at HIGH `confidence` — the mode is a parsed literal,
+not a heuristic guess. Use `--min-confidence high` to keep CWE-732 alongside
+other parsed-evidence findings, or filter on `CWE-732` in your suppression
+file as usual.
+
+```bash
+$ blight --binary path/to/elf --checks 732 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [732],
+  "findings": [
+    {
+      "cwe": 732,
+      "function": "open_world",
+      "address": "0x401160",
+      "evidence": "[MEDIUM] call to chmod with world-writable permission mode 0o777 (insecure permission assignment)",
+      "symbol": "chmod",
       "confidence": "high"
     }
   ]

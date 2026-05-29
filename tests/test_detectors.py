@@ -24,6 +24,7 @@ from blight.detectors import (
     cwe426,
     cwe476,
     cwe676,
+    cwe732,
     cwe798,
 )
 from tests.fake_session import (
@@ -191,6 +192,20 @@ from tests.fake_session import (
     system_vuln_session,
     tmpnam_vuln_session,
     write_return_saved_session,
+    cwe732_chmod_world_writable_vuln_session,
+    cwe732_fchmod_world_writable_vuln_session,
+    cwe732_chmod_setuid_vuln_session,
+    cwe732_chmod_safe_mode_session,
+    cwe732_mkdir_world_writable_vuln_session,
+    cwe732_creat_world_writable_vuln_session,
+    cwe732_fchmodat_world_writable_vuln_session,
+    cwe732_mkdirat_world_writable_vuln_session,
+    cwe732_chmod_nonconstant_session,
+    cwe732_mkdir_safe_mode_session,
+    cwe732_clean_session,
+    cwe732_arm64_chmod_world_writable_vuln_session,
+    cwe732_arm64_chmod_safe_mode_session,
+    cwe732_multi_call_session,
 )
 
 
@@ -1639,3 +1654,103 @@ class TestCwe401:
 
     def test_arm64_does_not_flag_when_freed(self) -> None:
         assert cwe401.detect(arm64_malloc_freed_session()) == []
+
+
+class TestCwe732:
+    def test_flags_chmod_world_writable(self) -> None:
+        findings = cwe732.detect(cwe732_chmod_world_writable_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 732
+        assert f.symbol == "chmod"
+        assert f.function == "open_world"
+        assert f.address == hex(0x401160)
+        assert "MEDIUM" in f.evidence
+        assert "0o777" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_fchmod_world_writable(self) -> None:
+        findings = cwe732.detect(cwe732_fchmod_world_writable_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 732
+        assert f.symbol == "fchmod"
+        assert "0o666" in f.evidence
+        assert "MEDIUM" in f.evidence
+
+    def test_flags_chmod_setuid_world_writable_as_high(self) -> None:
+        findings = cwe732.detect(cwe732_chmod_setuid_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 732
+        assert f.symbol == "chmod"
+        assert "HIGH" in f.evidence
+        assert "setuid" in f.evidence or "setgid" in f.evidence
+        assert f.confidence == "high"
+
+    def test_does_not_flag_safe_chmod_mode(self) -> None:
+        # 0o644 has no world-writable bit — must NOT flag.
+        assert cwe732.detect(cwe732_chmod_safe_mode_session()) == []
+
+    def test_does_not_flag_safe_mkdir_mode(self) -> None:
+        # 0o755 is the canonical safe directory mode — must NOT flag.
+        assert cwe732.detect(cwe732_mkdir_safe_mode_session()) == []
+
+    def test_flags_mkdir_world_writable(self) -> None:
+        findings = cwe732.detect(cwe732_mkdir_world_writable_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "mkdir"
+        assert findings[0].function == "make_tmp"
+        assert "0o777" in findings[0].evidence
+
+    def test_flags_creat_world_writable(self) -> None:
+        findings = cwe732.detect(cwe732_creat_world_writable_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "creat"
+        assert "0o666" in findings[0].evidence
+
+    def test_flags_fchmodat_world_writable_arg2_position(self) -> None:
+        # mode lives at arg2 (rdx) for fchmodat — register-position resolution
+        # must follow the per-symbol arg index table.
+        findings = cwe732.detect(cwe732_fchmodat_world_writable_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "fchmodat"
+        assert "0o777" in findings[0].evidence
+
+    def test_flags_mkdirat_world_writable_arg2_position(self) -> None:
+        findings = cwe732.detect(cwe732_mkdirat_world_writable_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "mkdirat"
+
+    def test_does_not_flag_nonconstant_mode(self) -> None:
+        # mode comes from a register move (`mov esi, eax`) — precision-first
+        # detector stays quiet on non-constant modes.
+        assert cwe732.detect(cwe732_chmod_nonconstant_session()) == []
+
+    def test_clean_session_no_findings(self) -> None:
+        assert cwe732.detect(cwe732_clean_session()) == []
+
+    def test_does_not_flag_when_no_chmod_imported(self) -> None:
+        # clean-baseline has no permission-setting imports either.
+        assert cwe732.detect(clean_baseline_session()) == []
+
+    def test_arm64_flags_chmod_world_writable(self) -> None:
+        findings = cwe732.detect(
+            cwe732_arm64_chmod_world_writable_vuln_session()
+        )
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 732
+        assert f.symbol == "chmod"
+        assert f.address == hex(0x840)
+        assert "0o777" in f.evidence
+
+    def test_arm64_does_not_flag_safe_mode(self) -> None:
+        assert cwe732.detect(cwe732_arm64_chmod_safe_mode_session()) == []
+
+    def test_multi_call_only_flags_world_writable(self) -> None:
+        findings = cwe732.detect(cwe732_multi_call_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.function == "vuln_chmod"
+        assert "0o777" in f.evidence

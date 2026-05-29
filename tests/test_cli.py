@@ -57,6 +57,7 @@ def test_resolve_all() -> None:
         426,
         476,
         676,
+        732,
         798,
     ]
 

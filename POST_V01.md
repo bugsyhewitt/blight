@@ -214,6 +214,39 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **CWE-732 — Incorrect Permission Assignment for Critical Resource**
+  (post-backlog; the *permissions* sibling of the existing PLT-anchored
+  argument-constant detectors). `src/blight/detectors/cwe732.py` flags
+  call-sites where `chmod` / `fchmod` / `fchmodat` / `mkdir` / `mkdirat` /
+  `creat` is invoked with a **constant** mode argument that grants
+  world-writable permissions. The embedded `0o777` / `0o666` mistake is the
+  canonical CWE-732 pattern in audited firmware: the binary ships with the
+  over-permissive mode every time it runs, no triage data flow needed —
+  the constant immediate is the evidence. **Chosen over CWE-415 / CWE-672**
+  (the original next-detector candidates) after re-reading the roster: both
+  were already shipped earlier in the wave (see CWE-415 below; CWE-672 is
+  closely covered by CWE-362's filesystem-TOCTOU detector). CWE-732 is the
+  highest-value unshipped MITRE Top-25-adjacent permission weakness that
+  fits the existing precision-first PLT-plus-arg-constant shape used by
+  CWE-78 and CWE-134, so it lands as a small, infrastructure-free PR. The
+  detector is a hybrid: PLT lookup locates the call sites, then per-
+  architecture argument-register inspection (the same `_argregs` machinery
+  shared with CWE-78 / CWE-134) parses the immediate that last writes the
+  mode register. The mode register varies by symbol — `chmod` / `fchmod` /
+  `mkdir` / `creat` carry mode at arg1; `fchmodat` / `mkdirat` carry mode
+  at arg2 — so the detector consults a per-symbol arg-index table before
+  reading the register convention. The parsed immediate is classified
+  against two precision-first tiers: **HIGH** when both world-writable
+  (`mode & 0o002`) and setuid/setgid (`mode & 0o6000`) bits are set (a
+  full privilege-escalation primitive — `0o4777` is the textbook case);
+  **MEDIUM** when world-writable without setuid/setgid (`0o777`, `0o666`).
+  Safe modes (`0o644`, `0o755`) are not flagged; a non-constant mode (a
+  register or memory operand reaching the mode position) is also not
+  flagged, by design — the detector exists to catch the literal-immediate
+  misconfiguration, not every dynamic chmod. Both severity tiers emit at
+  HIGH triage confidence, because the immediate is a parsed literal (no
+  heuristic guess). Architecture-aware on x86_64 and AArch64.
+
 - **CWE-401 — Missing Release of Memory after Effective Lifetime** (memory
   leak; the *inverse-sink* sibling of the heap-lifetime detectors, built on the
   single-function alias-tracking machinery shared by CWE-122 / CWE-415 /
