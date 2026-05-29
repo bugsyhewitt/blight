@@ -43,7 +43,7 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format {json,sarif,text}] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
@@ -52,6 +52,8 @@ blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format {json
   `476`, `676`, or `all` (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
+- `--output-file FILE` (`-o FILE`) — write the report to `FILE` instead of
+  stdout (see **Writing the report to a file** below)
 - `--workers` — number of parallel worker threads for a directory scan
   (default: `1`, sequential). Ignored when `--binary` is a single file.
 - `--suppress FILE` — path to a JSON suppression file listing known false
@@ -102,6 +104,25 @@ identical to a sequential one. A failure on a single binary (e.g. an unreadable
 file) is isolated: that entry carries an `"error"` string and the remaining
 binaries are still scanned. With `--format sarif`, a directory scan emits one
 SARIF document covering all findings across the corpus.
+
+### Writing the report to a file
+
+By default the report is printed to stdout. `--output-file FILE` (short form
+`-o FILE`) writes it to `FILE` instead — the file is created or truncated and
+nothing is printed to stdout, so a wrapper script can pipeline the report
+without scraping it out of the terminal:
+
+```bash
+blight --binary ./firmware/bin --checks all --format sarif -o blight.sarif
+```
+
+The flag is format-agnostic: it writes whichever `--format` is selected
+(`json`, `sarif`, or `text`), byte-for-byte identical to what would have gone
+to stdout (with a single trailing newline). Pass `-o -` to force stdout
+explicitly (the default). `--output-file` does not change the `--fail-on` exit code — the CI
+gate still trips on the same findings whether the report lands in a file or on
+stdout. If the file cannot be written (e.g. the parent directory does not
+exist), `blight` aborts with a usage error before exiting.
 
 ### Confidence scoring
 
