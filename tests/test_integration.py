@@ -78,6 +78,35 @@ def test_clean_baseline_zero_findings(session_for) -> None:
 
 
 @pytest.mark.skipif(not (_HAVE_R2 and _HAVE_R2PIPE), reason=_SKIP_REASON)
+def test_cwe798_on_creds_vuln(session_for) -> None:
+    # The creds-vuln fixture embeds a hard-coded admin password, an api_key, and
+    # a credential-bearing connection URI as .rodata string literals. The
+    # CWE-798 detector reads them out of the real binary via izzj.
+    findings = run_checks(session_for("creds-vuln"), [798])
+    symbols = {f.symbol for f in findings}
+    assert "password" in symbols
+    assert "api_key" in symbols
+    assert "connection-uri" in symbols
+    for f in findings:
+        assert f.cwe == 798
+        assert f.confidence in ("high", "medium", "low")
+        assert f.address.startswith("0x")
+        # The secret value itself must never appear verbatim in the report.
+        assert "Sup3rSecretAdminPW" not in f.evidence
+        assert "hunter2dbpass" not in f.evidence
+
+
+@pytest.mark.skipif(not (_HAVE_R2 and _HAVE_R2PIPE), reason=_SKIP_REASON)
+def test_strings_surfaces_rodata_literals(session_for) -> None:
+    # The real Radare2Session.strings() (izzj) must surface the embedded
+    # credential literals so CWE-798 has data to scan.
+    strings = session_for("creds-vuln").strings()
+    blob = "\n".join(s.string for s in strings)
+    assert "password=" in blob
+    assert "mysql://" in blob
+
+
+@pytest.mark.skipif(not (_HAVE_R2 and _HAVE_R2PIPE), reason=_SKIP_REASON)
 def test_arch_detected_for_x86_64_fixtures(session_for) -> None:
     # The shipped fixtures are x86_64 ELFs; arch() must resolve them via iAj to
     # the normalized "x86_64" key so the register heuristics pick rdi/rsi/rdx.

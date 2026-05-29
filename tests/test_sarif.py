@@ -133,6 +133,7 @@ class TestSarifLevelMapping:
         (327, "error"),
         (426, "error"),
         (676, "warning"),
+        (798, "error"),
         (999, "note"),    # unknown CWE defaults to note
     ])
     def test_level_mapping(self, cwe, expected):

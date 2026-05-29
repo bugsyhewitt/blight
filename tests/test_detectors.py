@@ -16,8 +16,19 @@ from blight.detectors import (
     cwe426,
     cwe476,
     cwe676,
+    cwe798,
 )
 from tests.fake_session import (
+    api_key_secret_shaped_vuln_session,
+    cwe798_all_session,
+    cwe798_no_strings_session,
+    cwe798_placeholder_clean_session,
+    openssh_key_blob_vuln_session,
+    passwd_colon_assignment_vuln_session,
+    password_assignment_vuln_session,
+    private_key_blob_vuln_session,
+    token_short_value_session,
+    uri_credential_vuln_session,
     arm64_malloc_checked_session,
     arm64_malloc_deref_vuln_session,
     arm64_setuid_checked_session,
@@ -965,3 +976,103 @@ class TestCwe426:
     def test_does_not_flag_absent_routine(self) -> None:
         # clean-baseline has none of the CWE-426 routines.
         assert cwe426.detect(clean_baseline_session()) == []
+
+
+class TestCwe798:
+    def test_flags_password_assignment_high(self) -> None:
+        findings = cwe798.detect(password_assignment_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 798
+        assert f.symbol == "password"
+        assert f.address == hex(0x402010)
+        assert f.function == ".rodata"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        # The raw secret value must be redacted out of the report.
+        assert "SuperSecret123" not in f.evidence
+        assert "len=" in f.evidence
+
+    def test_flags_colon_style_assignment(self) -> None:
+        findings = cwe798.detect(passwd_colon_assignment_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 798
+        assert f.symbol == "db_passwd"
+        assert f.confidence == "high"
+        assert "hunter2value" not in f.evidence
+
+    def test_api_key_long_value_is_high(self) -> None:
+        findings = cwe798.detect(api_key_secret_shaped_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 798
+        assert f.symbol == "api_key"
+        # A long, secret-shaped token value upgrades token-class to HIGH.
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+
+    def test_token_short_value_is_medium(self) -> None:
+        findings = cwe798.detect(token_short_value_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 798
+        assert f.symbol == "token"
+        # A short token-class value stays MEDIUM (could be a config knob).
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_pem_private_key(self) -> None:
+        findings = cwe798.detect(private_key_blob_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 798
+        assert f.confidence == "high"
+        assert "private key" in f.evidence.lower()
+        assert f.address == hex(0x403000)
+
+    def test_flags_openssh_private_key(self) -> None:
+        findings = cwe798.detect(openssh_key_blob_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].confidence == "high"
+        assert "private key" in findings[0].evidence.lower()
+
+    def test_flags_uri_credential(self) -> None:
+        findings = cwe798.detect(uri_credential_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 798
+        assert f.symbol == "connection-uri"
+        assert f.confidence == "high"
+        # The inline password must be redacted, not echoed.
+        assert "hunter2pass" not in f.evidence
+        assert "URI" in f.evidence
+
+    def test_placeholders_and_empty_do_not_fire(self) -> None:
+        # %s templates, empty values, ${VAR}, sentinels, and non-secret keys
+        # (username=) must all be rejected.
+        assert cwe798.detect(cwe798_placeholder_clean_session()) == []
+
+    def test_no_strings_no_findings(self) -> None:
+        assert cwe798.detect(cwe798_no_strings_session()) == []
+
+    def test_flags_all_signals_together(self) -> None:
+        findings = cwe798.detect(cwe798_all_session())
+        symbols = {f.symbol for f in findings}
+        # password assignment, api_key assignment, PEM key, and URI credential.
+        assert "password" in symbols
+        assert "api_key" in symbols
+        assert "connection-uri" in symbols
+        assert any("private key" in f.evidence.lower() for f in findings)
+        # Benign neighbours (format templates, username=) must NOT appear.
+        assert "username" not in symbols
+        assert len(findings) == 4
+        for f in findings:
+            assert f.cwe == 798
+            assert f.address.startswith("0x")
+            assert f.evidence
+            assert f.confidence in ("high", "medium", "low")
+
+    def test_clean_baseline_no_findings(self) -> None:
+        # clean-baseline session carries no strings → nothing to flag.
+        assert cwe798.detect(clean_baseline_session()) == []

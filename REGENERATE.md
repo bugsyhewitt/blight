@@ -12,6 +12,7 @@ without a C toolchain. This file documents how to rebuild them from source.
 | `system-vuln` | `system-vuln.c` | CWE-78 (`system` with non-constant arg, `execl`) |
 | `gets-vuln` | `gets-vuln.c` | CWE-242 (`gets`) |
 | `clean-baseline` | `clean-baseline.c` | nothing (zero-finding baseline) |
+| `creds-vuln` | `creds-vuln.c` | CWE-798 (hard-coded password, api_key, credential URI in .rodata) |
 
 All sources live in `tests/fixtures/`.
 

@@ -30,7 +30,7 @@ from tests.fake_session import (
     system_vuln_session,
 )
 
-ALL_CHECKS = [22, 78, 89, 119, 120, 134, 242, 252, 295, 327, 426, 476, 676]
+ALL_CHECKS = [22, 78, 89, 119, 120, 134, 242, 252, 295, 327, 426, 476, 676, 798]
 
 # Map a synthetic binary "path" to the fake session it should produce. This lets
 # us build a deterministic, varied corpus without touching disk or radare2.
