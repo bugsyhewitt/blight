@@ -210,6 +210,50 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **CWE-22 — Improper Limitation of a Pathname to a Restricted Directory
+  ("Path Traversal")** (post-backlog; new static-analysis detector).
+  `src/blight/detectors/cwe22.py` flags call sites to filesystem routines that
+  consume a *pathname* — the sinks where a path-traversal vulnerability lands
+  when the path is built from untrusted input and is not first canonicalised
+  (`realpath`) and confined to an intended base directory. Two severity tiers:
+  HIGH for routines that destroy / replace / escalate via a pathname
+  (`unlink`/`unlinkat`/`remove`/`rmdir` delete, `rename` move-or-overwrite,
+  `symlink`/`link` the classic `../`-plus-symlink escape, `chmod`/`chown`/
+  `lchown`, `mkdir`, and the exec-by-path family `execv`/`execve`/`execvp`), and
+  MEDIUM for routines that open or read metadata for a pathname (`open`/`open64`/
+  `openat`/`fopen`/`fopen64`/`freopen`/`creat`, `opendir`, `access`/`stat`/
+  `lstat` — also a TOCTOU hint — and `readlink`), which appear routinely in
+  fully-validated code and are therefore a triage signal rather than a confirmed
+  bug. The canonicalisation primitive `realpath` is deliberately **not** flagged
+  — it is part of the recommended mitigation, and flagging it would invert the
+  signal. Like CWE-89, CWE-119, CWE-327, CWE-295 and CWE-676 it is a *pure
+  PLT-lookup* detector built on the existing `_common.call_sites` helper: it
+  deliberately does **not** read the path argument out of the disassembly to
+  prove it is non-constant or attacker-derived (the pathname arrives in different
+  argument positions across these routines — `open`'s is the first argument,
+  `openat`'s is the second, `rename` takes two paths — and is frequently built
+  across basic blocks via `snprintf`/`strcat`/`realpath`, so per-routine,
+  per-architecture data flow would buy marginal precision), so the call to a
+  path-consuming routine is itself the finding, surfaced at the per-symbol
+  confidence (HIGH→`high`, MEDIUM→`medium`) in the evidence string for triage.
+  Zero new infrastructure, architecture-agnostic (works on every arch radare2
+  can disassemble). Registered as check `22`, so the `--checks {22,…,all}` token
+  and the `all` set wire in automatically through the `DETECTORS` dispatch dict;
+  SARIF maps CWE-22 to level `error`. Chosen as the next improvement because the
+  entire ranked backlog (items 1-8) plus every CLI/output-layer item and the
+  CWE-78/89/119/120/295/327 families had already shipped, and of the two named
+  remaining candidates (CWE-22 path traversal, CWE-362 TOCTOU) path traversal is
+  the better fit for blight's PLT-level approach: its sinks are well-defined
+  single-symbol call sites, whereas a precise TOCTOU detector needs the *pair*
+  (check-then-use) and call-sequence/argument-aliasing data flow that is fragile
+  at the PLT level (the highest-value TOCTOU primitives `tmpnam`/`mktemp` are
+  already covered by CWE-676). The remaining high-yield classes (CWE-190 integer
+  overflow, CWE-416 use-after-free) still require symbolic execution / heap
+  modeling that is out of scope for blight's static PLT-and-disassembly approach.
+  12 new unit tests (`tests/test_detectors.py::TestCwe22`); the `--checks all`,
+  scan-fixture, and SARIF-mapping assertions were updated to include `22`. Test
+  count 284 → 296.
+
 - **CWE-119 — Improper Restriction of Operations within the Bounds of a Memory
   Buffer** (post-backlog; new static-analysis detector). `src/blight/detectors/cwe119.py`
   flags call sites to the memory-copy / concatenation primitives whose safe use

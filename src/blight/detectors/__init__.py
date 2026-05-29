@@ -16,6 +16,7 @@ from blight.findings import Finding
 from blight.r2 import R2Session
 
 from . import (
+    cwe22,
     cwe78,
     cwe89,
     cwe119,
@@ -33,6 +34,7 @@ Detector = Callable[[R2Session], list[Finding]]
 
 # Keyed by the integer CWE id the CLI accepts via --checks.
 DETECTORS: dict[int, Detector] = {
+    22: cwe22.detect,
     78: cwe78.detect,
     89: cwe89.detect,
     119: cwe119.detect,

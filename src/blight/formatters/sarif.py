@@ -5,6 +5,7 @@ security extensions. Each unique CWE becomes a rule; each Finding becomes
 a result referencing that rule.
 
 Severity mapping (no severity field on Finding — derived from CWE class):
+  CWE-22  (Path Traversal)               → HIGH  → "error"
   CWE-78  (OS Command Injection)         → HIGH  → "error"
   CWE-89  (SQL Injection)                → HIGH  → "error"
   CWE-119 (Memory-Bounds Restriction)    → HIGH  → "error"
@@ -33,6 +34,7 @@ _INFORMATION_URI = "https://github.com/bugsyhewitt/blight"
 
 # CWE id → (short description, SARIF level)
 _CWE_META: dict[int, tuple[str, str]] = {
+    22:  ("Improper Limitation of a Pathname to a Restricted Directory", "error"),
     78:  ("OS Command Injection", "error"),
     89:  ("SQL Injection", "error"),
     119: ("Improper Restriction of Operations within the Bounds of a Memory Buffer", "error"),
