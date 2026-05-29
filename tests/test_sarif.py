@@ -129,6 +129,7 @@ class TestSarifLevelMapping:
         (120, "error"),
         (122, "error"),
         (134, "error"),
+        (197, "warning"),
         (242, "warning"),
         (295, "error"),
         (327, "error"),

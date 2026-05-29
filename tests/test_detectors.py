@@ -10,6 +10,7 @@ from blight.detectors import (
     cwe120,
     cwe122,
     cwe134,
+    cwe197,
     cwe242,
     cwe252,
     cwe295,
@@ -79,6 +80,16 @@ from tests.fake_session import (
     arm64_udiv_checked_session,
     cwe369_multi_function_session,
     cwe369_clean_session,
+    cwe197_strlen_truncated_session,
+    cwe197_read_truncated_session,
+    cwe197_word_store_truncated_session,
+    cwe197_fullwidth_safe_session,
+    cwe197_reextended_safe_session,
+    cwe197_movsxd_reextended_safe_session,
+    cwe197_no_wide_returner_session,
+    cwe197_arm64_truncated_session,
+    cwe197_arm64_fullwidth_safe_session,
+    cwe197_multi_call_session,
     free_then_deref_vuln_session,
     free_then_null_assign_session,
     free_then_xor_zero_session,
@@ -1195,6 +1206,66 @@ class TestCwe369:
 
     def test_clean_session_no_findings(self) -> None:
         assert cwe369.detect(cwe369_clean_session()) == []
+
+
+class TestCwe197:
+    """CWE-197 Numeric Truncation — PLT-anchored, single-function forward scan
+    over wide-return libc routines whose result is narrowed."""
+
+    def test_flags_strlen_truncated_to_int(self) -> None:
+        findings = cwe197.detect(cwe197_strlen_truncated_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 197
+        assert f.symbol == "strlen"
+        assert f.confidence == "low"
+        assert f.address == hex(0x401152)
+        assert "strlen" in f.evidence
+
+    def test_flags_read_truncated_to_int(self) -> None:
+        findings = cwe197.detect(cwe197_read_truncated_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "read"
+        assert findings[0].address == hex(0x401210)
+
+    def test_flags_word_store_truncation(self) -> None:
+        # A 16-bit store of a 64-bit strtoul result is an even more severe drop.
+        findings = cwe197.detect(cwe197_word_store_truncated_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "strtoul"
+
+    def test_fullwidth_store_not_flagged(self) -> None:
+        # `mov qword [..], rax` keeps all 64 bits → no truncation.
+        assert cwe197.detect(cwe197_fullwidth_safe_session()) == []
+
+    def test_cdqe_reextension_not_flagged(self) -> None:
+        # `cdqe` re-extends eax->rax → the magnitude is preserved.
+        assert cwe197.detect(cwe197_reextended_safe_session()) == []
+
+    def test_movsxd_reextension_not_flagged(self) -> None:
+        # `movsxd rbx, eax` re-extends the narrowed value back to 64 bits.
+        assert cwe197.detect(cwe197_movsxd_reextended_safe_session()) == []
+
+    def test_int_returning_source_not_flagged(self) -> None:
+        # atoi returns int, not a wide type → storing it as int loses no bits.
+        assert cwe197.detect(cwe197_no_wide_returner_session()) == []
+
+    def test_flags_arm64_truncation(self) -> None:
+        findings = cwe197.detect(cwe197_arm64_truncated_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "strlen"
+        assert f.address == hex(0x848)
+
+    def test_arm64_fullwidth_store_not_flagged(self) -> None:
+        # `str x0, [..]` is a 64-bit store → no truncation on AArch64.
+        assert cwe197.detect(cwe197_arm64_fullwidth_safe_session()) == []
+
+    def test_scans_every_call_site(self) -> None:
+        # Two wide-return call sites: one truncates (flag), one keeps width.
+        findings = cwe197.detect(cwe197_multi_call_session())
+        assert len(findings) == 1
+        assert findings[0].address == hex(0x401152)
 
 
 class TestCwe362:

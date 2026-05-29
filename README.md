@@ -43,14 +43,14 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {22,78,89,119,120,122,134,242,252,295,327,362,369,401,415,416,426,476,676,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {22,78,89,119,120,122,134,197,242,252,295,327,362,369,401,415,416,426,476,676,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
 - `--checks` — which CWE check to run; one of `22`, `78`, `89`, `119`, `120`,
-  `122`, `134`, `242`, `252`, `295`, `327`, `362`, `369`, `401`, `415`, `416`,
-  `426`, `476`, `676`, `798`, or `all` (default: `all`)
+  `122`, `134`, `197`, `242`, `252`, `295`, `327`, `362`, `369`, `401`, `415`,
+  `416`, `426`, `476`, `676`, `798`, or `all` (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
 - `--output-file FILE` (`-o FILE`) — write the report to `FILE` instead of
@@ -136,7 +136,7 @@ is, not how severe the bug would be if exploited:
 |---|---|---|
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
-| `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-676 (LOW-severity symbols) |
+| `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
@@ -304,9 +304,9 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-252, CWE-295, CWE-327,
-CWE-362, CWE-369, CWE-401, CWE-415, CWE-416, CWE-426, CWE-476, CWE-676, and
-CWE-798 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
+in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-197, CWE-252, CWE-295,
+CWE-327, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416, CWE-426, CWE-476, CWE-676,
+and CWE-798 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
 
@@ -529,6 +529,63 @@ is not a constant string literal**. A literal format such as
 `printf("Hello %s\n", name)` is not flagged; a format built from a buffer or
 variable is. Like CWE-78, the format-argument register is resolved per
 architecture, so this works on x86_64 and AArch64.
+
+### CWE-197 — Numeric Truncation Error
+
+A **wide value** — a `size_t` / `ssize_t` / `long` (64 bits on LP64 targets) —
+returned by a libc routine whose result the program **truncates into a narrower
+destination** before ever using it at full width. The canonical C source is
+`int n = strlen(s);` or `int n = read(fd, buf, len);`: the call returns a 64-bit
+count in the return register (`rax` on x86_64, `x0` on AArch64), and the compiler
+stores only the 32-bit view (`eax` / `w0`) into the `int` slot. If the true value
+exceeds `INT_MAX` (a 2GB+ `read`, a giant attacker-supplied length, a negative
+`ssize_t` error code sign-confused into a large `int`), the truncated value
+silently disagrees with reality — a classic source of under-allocations and
+bounds-check bypasses.
+
+This is a PLT-anchored, single-function forward scan (the same shape as CWE-401
+and CWE-369). The detector finds every call site to a wide-return routine —
+`strlen`, `strnlen`, `wcslen`, `read`, `pread`, `recv`, `recvfrom`, `readv`,
+`fread`, `write`, `send`, `strtol`/`strtoul`/`strtoll`/`strtoull`, `mbstowcs`,
+`wcstombs`, `sysconf`, `ftell`, `lseek` — seeds the 64-bit return register, then
+walks the instructions after the call:
+
+- a **narrowing use** — a move or store of the value's 32/16/8-bit sub-register
+  into a narrower slot (`mov dword [rbp - 4], eax`, `mov word [rbp - 2], ax`,
+  AArch64 `str w0, [..]`) drops the high bits → **flagged**;
+- a **full-width use** — a 64-bit store (`mov qword [..], rax`), a 64-bit compare
+  (`cmp rax, ...`), or a 64-bit register move keeps all the bits → not flagged;
+- a **re-extension** — `cdqe` / `cltq` / `movsx` / `movsxd` (x86_64) or `sxtw` /
+  `uxtw` (AArch64) re-widens the value back to 64 bits, preserving its magnitude
+  → not flagged.
+
+`int`-returning sources (`atoi`, etc.) are not in the source set — storing an
+`int` into an `int` loses no bits, so they are never flagged.
+
+```bash
+$ blight --binary path/to/elf --checks 197 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [197],
+  "findings": [
+    {
+      "cwe": 197,
+      "function": "process",
+      "address": "0x401152",
+      "evidence": "wide return value of strlen (size_t/ssize_t/long) is truncated into a narrower destination without re-extension (possible numeric truncation / lost high bits)",
+      "symbol": "strlen",
+      "confidence": "low"
+    }
+  ]
+}
+```
+
+Whether the runtime value actually exceeds the narrow destination's range needs
+value/range analysis that blight keeps out of scope, so every CWE-197 finding is
+`low` confidence — it marks a *statically-visible* truncating store of a
+known-wide return value. The detector is architecture-aware on x86_64 and
+AArch64. (CWE-190 integer overflow was evaluated alongside it and deferred: it
+requires symbolic execution for precise detection — see [POST_V01.md](POST_V01.md).)
 
 ### CWE-242 — Use of Inherently Dangerous Function
 
