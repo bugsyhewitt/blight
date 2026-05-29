@@ -15,6 +15,7 @@ from blight.detectors import (
     cwe327,
     cwe362,
     cwe369,
+    cwe415,
     cwe416,
     cwe426,
     cwe476,
@@ -86,6 +87,15 @@ from tests.fake_session import (
     cwe416_no_free_imports_session,
     arm64_free_then_deref_vuln_session,
     arm64_free_then_null_assign_session,
+    double_free_vuln_session,
+    double_free_via_alias_vuln_session,
+    double_free_nulled_between_session,
+    double_free_xor_between_session,
+    single_free_session,
+    free_then_nonfree_use_session,
+    cwe415_no_free_imports_session,
+    arm64_double_free_vuln_session,
+    arm64_double_free_nulled_session,
     access_toctou_vuln_session,
     faccessat_toctou_vuln_session,
     stat_toctou_vuln_session,
@@ -1234,6 +1244,62 @@ class TestCwe362:
         # Only fd-based/atomic primitives (fstat, openat) and a use sink (open)
         # are imported — no check-by-path primitive is present.
         assert cwe362.detect(cwe362_clean_session()) == []
+
+
+class TestCwe415:
+    """CWE-415 double-free — in-function forward scan with alias tracking."""
+
+    def test_flags_double_free(self) -> None:
+        findings = cwe415.detect(double_free_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 415
+        assert f.symbol == "free"
+        assert f.function == "dbl_free"
+        assert f.address == hex(0x401150)
+        assert "double-free" in f.evidence
+        assert f.confidence == "low"
+
+    def test_flags_double_free_through_alias(self) -> None:
+        # rbx = rdi; rdi = rbx; free(rdi) — alias propagation still a double-free.
+        findings = cwe415.detect(double_free_via_alias_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "free"
+        assert f.function == "alias_dbl"
+
+    def test_does_not_flag_when_nulled_between(self) -> None:
+        # mov rdi, 0 between the two frees severs the alias → safe.
+        assert cwe415.detect(double_free_nulled_between_session()) == []
+
+    def test_does_not_flag_when_xored_between(self) -> None:
+        # xor rdi, rdi between the two frees zeroes the register → safe.
+        assert cwe415.detect(double_free_xor_between_session()) == []
+
+    def test_does_not_flag_single_free(self) -> None:
+        # A pointer freed exactly once is not a double-free.
+        assert cwe415.detect(single_free_session()) == []
+
+    def test_does_not_flag_nonfree_use(self) -> None:
+        # free then a generic use (puts) is CWE-416's signal, not a double-free.
+        assert cwe415.detect(free_then_nonfree_use_session()) == []
+
+    def test_no_free_imports_no_findings(self) -> None:
+        assert cwe415.detect(cwe415_no_free_imports_session()) == []
+
+    def test_clean_baseline_no_findings(self) -> None:
+        assert cwe415.detect(clean_baseline_session()) == []
+
+    def test_arm64_flags_double_free(self) -> None:
+        findings = cwe415.detect(arm64_double_free_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 415
+        assert f.symbol == "free"
+        assert f.function == "dbl_free"
+
+    def test_arm64_does_not_flag_when_nulled_between(self) -> None:
+        assert cwe415.detect(arm64_double_free_nulled_session()) == []
 
 
 class TestCwe416:
