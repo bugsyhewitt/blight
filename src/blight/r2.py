@@ -69,6 +69,8 @@ class R2Session(Protocol):
 
     def function_instructions(self, func_addr: int) -> list[Instruction]: ...
 
+    def function_addrs(self) -> list[int]: ...
+
     def arch(self) -> str: ...
 
     def strings(self) -> list[Str]: ...
@@ -140,6 +142,28 @@ class Radare2Session:
                     disasm=o.get("disasm") or o.get("opcode", ""),
                 )
             )
+        return out
+
+    def function_addrs(self) -> list[int]:
+        """Return the entry address of every function radare2 discovered.
+
+        Backed by ``aflj`` (the analysis function list). Detectors that reason
+        about instruction patterns which are not anchored to a library call site
+        — e.g. a divide-by-zero where the divisor is a register — need to walk
+        every function body, not just PLT cross-references.
+        """
+        data = self._cmdj("aflj")
+        if not isinstance(data, list):
+            return []
+        out: list[int] = []
+        for fn in data:
+            # radare2 reports the function entry under "offset" on some builds
+            # and "addr" on others; accept whichever is an integer.
+            addr = fn.get("offset")
+            if not isinstance(addr, int):
+                addr = fn.get("addr")
+            if isinstance(addr, int):
+                out.append(addr)
         return out
 
     def strings(self) -> list[Str]:

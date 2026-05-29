@@ -97,6 +97,32 @@ def test_cwe798_on_creds_vuln(session_for) -> None:
 
 
 @pytest.mark.skipif(not (_HAVE_R2 and _HAVE_R2PIPE), reason=_SKIP_REASON)
+def test_cwe369_on_divzero_vuln(session_for) -> None:
+    # divzero-vuln has two divisions: compute_ratio() divides by a caller value
+    # with NO zero-check (must flag) and safe_ratio() guards the divisor with
+    # `if (d == 0)` first (must NOT flag). The detector walks every function body
+    # via aflj/pdfj and recognizes the cmp-against-the-same-operand guard.
+    findings = run_checks(session_for("divzero-vuln"), [369])
+    assert len(findings) == 1
+    f = findings[0]
+    assert f.cwe == 369
+    assert f.symbol in ("idiv", "div")
+    assert f.confidence == "low"
+    assert f.address.startswith("0x")
+    assert "zero-check" in f.evidence
+
+
+@pytest.mark.skipif(not (_HAVE_R2 and _HAVE_R2PIPE), reason=_SKIP_REASON)
+def test_function_addrs_lists_functions(session_for) -> None:
+    # The real Radare2Session.function_addrs() (aflj) must surface the user
+    # functions so the instruction-pattern detectors (CWE-369) have bodies to
+    # walk. The two divzero helpers are among the discovered functions.
+    addrs = session_for("divzero-vuln").function_addrs()
+    assert len(addrs) >= 2
+    assert all(isinstance(a, int) for a in addrs)
+
+
+@pytest.mark.skipif(not (_HAVE_R2 and _HAVE_R2PIPE), reason=_SKIP_REASON)
 def test_strings_surfaces_rodata_literals(session_for) -> None:
     # The real Radare2Session.strings() (izzj) must surface the embedded
     # credential literals so CWE-798 has data to scan.

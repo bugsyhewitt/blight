@@ -43,13 +43,13 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {22,78,89,119,120,134,242,252,295,327,426,476,676,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {22,78,89,119,120,134,242,252,295,327,369,426,476,676,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
 - `--checks` — which CWE check to run; one of `22`, `78`, `89`, `119`, `120`,
-  `134`, `242`, `252`, `295`, `327`, `426`, `476`, `676`, `798`, or `all`
+  `134`, `242`, `252`, `295`, `327`, `369`, `426`, `476`, `676`, `798`, or `all`
   (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
@@ -136,7 +136,7 @@ is, not how severe the bug would be if exploited:
 |---|---|---|
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
-| `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-676 (LOW-severity symbols) |
+| `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
@@ -304,8 +304,8 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-22, CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-426,
-CWE-476, CWE-676, and CWE-798 were added post-v0.1 (see
+in v0.1; CWE-22, CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-369,
+CWE-426, CWE-476, CWE-676, and CWE-798 were added post-v0.1 (see
 [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
@@ -589,6 +589,63 @@ $ blight --binary path/to/elf --checks 327 --format json
 The confidence mirrors the per-symbol severity (HIGH→`high`, MEDIUM→`medium`),
 the same policy as CWE-676. Because it is a pure PLT lookup it is
 architecture-agnostic and works on every architecture radare2 can disassemble.
+
+### CWE-369 — Divide By Zero
+
+An integer division or remainder instruction whose **divisor is not a
+proven-nonzero constant** — it comes from a register or a stack/memory operand
+that the code did not zero-check first. If that divisor can be zero at runtime
+(an attacker-controlled length, a parsed field, an untrusted count), the
+division **traps** (SIGFPE on x86_64) or yields undefined behaviour.
+
+Unlike every other blight check this is **not** a PLT-lookup — there is no
+library call to cross-reference. The divide is a raw instruction, so the
+detector walks **every function body** radare2 discovered (`aflj` →
+`function_addrs`, then `pdfj` per function) and inspects each division opcode:
+
+| Architecture | Opcodes | Divisor operand |
+|---|---|---|
+| x86_64 | `div`, `idiv` | the single operand (`idiv ecx`, `idiv dword [rbp - 8]`) |
+| AArch64 | `sdiv`, `udiv` | the **third** operand (`sdiv w0, w1, w2` → `w2`) |
+
+A division is flagged only when the divisor is **unguarded**. The detector does
+a conservative in-function backward scan for a zero-check that dominates the
+divide on a linear path:
+
+- **register divisor** — a `test D, D` / `cmp D, 0` (x86_64) or `cbz`/`cbnz` /
+  `cmp D, #0` (AArch64) earlier in the function marks `D` as checked; a
+  `mov D, <nonzero immediate>` proves the divisor is a literal constant.
+- **memory divisor** — a `cmp` against the **same** memory operand
+  (`cmp dword [rbp - 8], 0` before `idiv dword [rbp - 8]`) is the guard, which
+  is the exact idiom GCC/clang emit for `if (d == 0)`.
+
+A literal-immediate divisor is treated as constant (and skipped — a non-zero
+literal cannot divide by zero).
+
+```bash
+$ blight --binary path/to/elf --checks 369 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [369],
+  "findings": [
+    {
+      "cwe": 369,
+      "function": "0x401126",
+      "address": "0x401134",
+      "evidence": "division with non-constant divisor 'dword [rbp - 8]' and no preceding zero-check (possible divide-by-zero / SIGFPE)",
+      "symbol": "idiv",
+      "confidence": "low"
+    }
+  ]
+}
+```
+
+Because proving the divisor is actually reachable as zero needs value/range
+analysis that blight keeps out of scope, every CWE-369 finding is `low`
+confidence — it marks an *unchecked* divisor, the statically-visible signal. The
+function is reported by its entry address (radare2's `aflj` carries the offset,
+not a resolved name, for this anchorless check). The detector is architecture-
+aware on x86_64 and AArch64.
 
 ### CWE-426 — Untrusted Search Path
 

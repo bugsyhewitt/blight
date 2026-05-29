@@ -13,6 +13,7 @@ without a C toolchain. This file documents how to rebuild them from source.
 | `gets-vuln` | `gets-vuln.c` | CWE-242 (`gets`) |
 | `clean-baseline` | `clean-baseline.c` | nothing (zero-finding baseline) |
 | `creds-vuln` | `creds-vuln.c` | CWE-798 (hard-coded password, api_key, credential URI in .rodata) |
+| `divzero-vuln` | `divzero-vuln.c` | CWE-369 (`idiv` with an unchecked divisor; plus a guarded division that must NOT fire) |
 
 All sources live in `tests/fixtures/`.
 
