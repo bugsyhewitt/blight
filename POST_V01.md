@@ -214,6 +214,44 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **CWE-330 — Use of Insufficiently Random Values** (predictable PRNG
+  seeding; the *seeding* sibling of CWE-676's bare-`rand` detector). Built on
+  the same PLT-anchored argument-register inspection used by CWE-78 / CWE-134
+  / CWE-732. `src/blight/detectors/cwe330.py` flags call sites to `srand` /
+  `srandom` / `srand48` / `seed48` where the seed is provably predictable:
+  either (HIGH) the return value of a publicly observable clock / pid source
+  (`time`, `gettimeofday`, `clock`, `clock_gettime`, `getpid`, `getppid`) —
+  the textbook predictable-seed primitive behind a long tail of token-
+  prediction, key-recovery and session-replay CVEs — or (MEDIUM) a small
+  constant immediate (≤ `0xff`), the canonical same-seed (CWE-336) mistake.
+  Bare `rand()` calls remain CWE-676's territory; the two detectors are
+  complementary — CWE-676 flags "predictable PRNG used at all", CWE-330 flags
+  "PRNG seeded in a way that fixes its output sequence ahead of time".
+  **Chosen over CWE-190 (integer overflow)** because precise CWE-190
+  detection requires symbolic execution and was deliberately deprioritised
+  in the Research Notes above, whereas CWE-330 fits the existing precision-
+  first PLT-plus-arg-register machinery exactly. The detector is a hybrid:
+  PLT lookup locates the seeding call sites; the same `_argregs` machinery
+  resolves the per-architecture seed-argument register; a backward walk of
+  the containing function finds the last write to that register, then
+  classifies it as a literal predictable-source-return move (HIGH), a literal
+  small-immediate move (MEDIUM), or unresolvable (skip — precision-first).
+  An *intervening unrelated call* between the predictable source and the
+  seed-register write breaks the link and silences the finding, because
+  the intervening call clobbers the return register the heuristic relies
+  on. Large constant immediates (`> 0xff`) are not flagged — they are likely
+  domain-specific literals embedded by the build system, not same-seed
+  mistakes. Both severity tiers carry HIGH triage confidence: the evidence
+  is read literally out of the disassembly (a literal immediate, or a literal
+  call sequence), so no heuristic guess is needed. Architecture-aware on
+  x86_64 and AArch64. Registered as check `330`, so the `--checks {…,330,…}`
+  CLI accepts it and the `DETECTORS` registry routes to its dispatch entry;
+  SARIF maps CWE-330 to level `error`. 15 new unit tests in the
+  `TestCwe330` block of `tests/test_detectors.py` and 13 new fixtures in
+  `tests/fake_session.py` cover both severity tiers, both architectures, the
+  intervening-call safe case, and a multi-call session with one predictable
+  and one non-constant seed.
+
 - **CWE-732 — Incorrect Permission Assignment for Critical Resource**
   (post-backlog; the *permissions* sibling of the existing PLT-anchored
   argument-constant detectors). `src/blight/detectors/cwe732.py` flags

@@ -49,8 +49,9 @@ blight --binary PATH [--checks {22,78,89,119,120,122,134,197,242,252,295,327,362
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
 - `--checks` — which CWE check to run; one of `22`, `78`, `89`, `119`, `120`,
-  `122`, `134`, `197`, `242`, `252`, `295`, `327`, `362`, `369`, `401`, `415`,
-  `416`, `426`, `476`, `676`, `732`, `798`, or `all` (default: `all`)
+  `122`, `134`, `191`, `197`, `242`, `252`, `295`, `327`, `330`, `362`, `369`,
+  `401`, `415`, `416`, `426`, `476`, `676`, `732`, `798`, or `all`
+  (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
 - `--output-file FILE` (`-o FILE`) — write the report to `FILE` instead of
@@ -134,7 +135,7 @@ is, not how severe the bug would be if exploited:
 
 | Confidence | Meaning | Applies to |
 |---|---|---|
-| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols), CWE-732 (parsed constant world-writable mode), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
+| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-330 (parsed predictable seed — clock/pid return or small constant immediate), CWE-426, CWE-676 (HIGH-severity symbols), CWE-732 (parsed constant world-writable mode), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
 | `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-191 (a size argument is produced by an unguarded subtraction but whether the operands actually underflow at runtime is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
 
@@ -305,8 +306,9 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
 in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-191, CWE-197, CWE-252,
-CWE-295, CWE-327, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416, CWE-426, CWE-476,
-CWE-676, CWE-732, and CWE-798 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
+CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416, CWE-426,
+CWE-476, CWE-676, CWE-732, and CWE-798 were added post-v0.1 (see
+[POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
 
@@ -759,6 +761,52 @@ $ blight --binary path/to/elf --checks 327 --format json
 The confidence mirrors the per-symbol severity (HIGH→`high`, MEDIUM→`medium`),
 the same policy as CWE-676. Because it is a pure PLT lookup it is
 architecture-agnostic and works on every architecture radare2 can disassemble.
+
+### CWE-330 — Use of Insufficiently Random Values (predictable PRNG seeding)
+
+Calls to a non-cryptographic PRNG seeding routine (`srand` / `srandom` /
+`srand48` / `seed48`) where the seed is *predictable*. Two textbook insecure
+patterns are flagged:
+
+| Seed pattern | Severity | Why it's flagged |
+|---|---|---|
+| Seed is the return value of a public clock / pid source — `time`, `gettimeofday`, `clock`, `clock_gettime`, `getpid`, `getppid` (e.g. `srand(time(NULL))`) | HIGH | The PRNG stream is fully determined by a value anyone watching the wall clock or `/proc` can recover — the canonical predictable-seed primitive behind a long tail of token-prediction, key-recovery, and session-replay CVEs |
+| Seed is a small constant immediate (`0`, `1`, any value ≤ `0xff`) | MEDIUM | The PRNG output is identical across every invocation of the binary — the same-seed (CWE-336) mistake |
+
+A seed loaded from a value the detector cannot resolve (a config-read at
+runtime, a register chain reaching outside the function, a large literal that
+is probably a domain-specific constant) is **not** flagged. Bare `rand()`
+calls remain CWE-676's territory; the two are complementary — CWE-676 catches
+"predictable PRNG used at all", CWE-330 catches "PRNG seeded in a way that
+fixes its output sequence ahead of time".
+
+The detector is a hybrid: PLT lookup locates the seeding call sites, then
+per-architecture argument-register inspection (the same machinery as CWE-78
+and CWE-732) walks the containing function backward to find the last
+instruction that writes the seed register. The HIGH case additionally checks
+that the most recent `call` before that write targets a known predictable
+source; an intervening unrelated call between the predictable source and the
+seed write breaks the link and the call site is left alone. x86_64 and AArch64
+are supported. Both severity tiers are emitted at HIGH `confidence` — the
+evidence is read literally out of the disassembly, not heuristically inferred.
+
+```bash
+$ blight --binary path/to/elf --checks 330 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [330],
+  "findings": [
+    {
+      "cwe": 330,
+      "function": "seed_prng",
+      "address": "0x401168",
+      "evidence": "[HIGH] call to srand with seed is the return value of time() (predictable clock/pid source) (predictable PRNG seeding)",
+      "symbol": "srand",
+      "confidence": "high"
+    }
+  ]
+}
+```
 
 ### CWE-362 — Race Condition (filesystem TOCTOU check-then-use)
 
