@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
-from blight.detectors import cwe78, cwe120, cwe134, cwe242, cwe252, cwe476, cwe676
+from blight.detectors import cwe78, cwe120, cwe134, cwe242, cwe252, cwe327, cwe476, cwe676
 from tests.fake_session import (
     arm64_malloc_checked_session,
     arm64_malloc_deref_vuln_session,
     arm64_setuid_checked_session,
     arm64_setuid_unchecked_vuln_session,
     asctime_vuln_session,
+    blowfish_vuln_session,
     calloc_stored_escapes_session,
     chroot_unchecked_fallthrough_session,
     clean_baseline_session,
     ctime_vuln_session,
     cwe252_clean_session,
+    cwe327_all_session,
+    cwe327_clean_session,
     cwe476_no_allocators_session,
     cwe676_all_session,
     cwe676_clean_session,
+    des_vuln_session,
     fopen_deref_vuln_session,
     fprintf_fmtstr_vuln_session,
     gets_vuln_session,
@@ -24,15 +28,19 @@ from tests.fake_session import (
     malloc_aliased_deref_vuln_session,
     malloc_checked_session,
     malloc_deref_vuln_session,
+    md5_vuln_session,
     mktemp_vuln_session,
     printf_constant_session,
     printf_fmtstr_vuln_session,
     printf_no_dangerous_imports_session,
     rand_vuln_session,
+    rc4_vuln_session,
     fclose_unchecked_call_clobber_session,
     setuid_checked_session,
     setuid_unchecked_vuln_session,
+    sha1_vuln_session,
     snprintf_fmtstr_vuln_session,
+    srand_vuln_session,
     strcpy_vuln_session,
     strtok_vuln_session,
     syslog_fmtstr_vuln_session,
@@ -223,6 +231,91 @@ class TestCwe676:
     def test_does_not_flag_absent_function(self) -> None:
         # clean-baseline has none of the CWE-676 functions.
         assert cwe676.detect(clean_baseline_session()) == []
+
+
+class TestCwe327:
+    def test_flags_md5(self) -> None:
+        findings = cwe327.detect(md5_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 327
+        assert f.symbol == "MD5"
+        assert f.function == "hash_pw"
+        assert f.address == hex(0x401160)
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "SHA-256" in f.evidence
+
+    def test_flags_sha1(self) -> None:
+        findings = cwe327.detect(sha1_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 327
+        assert f.symbol == "SHA1"
+        assert f.function == "sign_blob"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_des(self) -> None:
+        findings = cwe327.detect(des_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 327
+        assert f.symbol == "DES_ecb_encrypt"
+        assert f.function == "encrypt_block"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "AES-GCM" in f.evidence
+
+    def test_flags_rc4(self) -> None:
+        findings = cwe327.detect(rc4_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 327
+        assert f.symbol == "RC4"
+        assert f.function == "stream_cipher"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_blowfish_medium(self) -> None:
+        findings = cwe327.detect(blowfish_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 327
+        assert f.symbol == "BF_cbc_encrypt"
+        assert f.function == "encrypt_cbc"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_srand_medium(self) -> None:
+        findings = cwe327.detect(srand_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 327
+        assert f.symbol == "srand"
+        assert f.function == "gen_key"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+        assert "getrandom" in f.evidence
+
+    def test_flags_all_representative_routines(self) -> None:
+        findings = cwe327.detect(cwe327_all_session())
+        symbols = {f.symbol for f in findings}
+        assert symbols == {"MD5", "SHA1", "DES_ecb_encrypt", "RC4", "BF_cbc_encrypt", "srand"}
+        for f in findings:
+            assert f.cwe == 327
+            assert f.function
+            assert f.address.startswith("0x")
+            assert f.evidence
+            assert f.confidence in ("high", "medium", "low")
+
+    def test_clean_session_no_findings(self) -> None:
+        # Only strong primitives (SHA256/AES-GCM/getrandom) are imported.
+        assert cwe327.detect(cwe327_clean_session()) == []
+
+    def test_does_not_flag_absent_routine(self) -> None:
+        # clean-baseline has none of the CWE-327 routines.
+        assert cwe327.detect(clean_baseline_session()) == []
 
 
 class TestCwe476:
