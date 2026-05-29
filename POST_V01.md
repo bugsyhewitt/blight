@@ -208,6 +208,42 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **CWE-295 — Improper Certificate Validation** (post-backlog; new
+  static-analysis heuristic). `src/blight/detectors/cwe295.py` flags call sites
+  to library routines whose *presence* marks where TLS/SSL certificate or
+  hostname verification is configured by hand — exactly the spot where
+  verification is most often disabled or weakened. Covered: OpenSSL verify-mode
+  toggles (`SSL_CTX_set_verify`/`SSL_set_verify` — HIGH, the mode is frequently
+  `SSL_VERIFY_NONE`), the wholesale chain-check replacement
+  `SSL_CTX_set_cert_verify_callback` (HIGH), the "I have *a* cert therefore
+  trusted" bug `SSL_get_peer_certificate` (MEDIUM — must be paired with
+  `SSL_get_verify_result`); GnuTLS `gnutls_certificate_set_verify_function`
+  (HIGH) and the no-hostname-check `gnutls_certificate_verify_peers2` (HIGH);
+  the libcurl `CURLOPT_SSL_VERIFYPEER`/`CURLOPT_SSL_VERIFYHOST` sink
+  `curl_easy_setopt` (MEDIUM); and mbedTLS `mbedtls_ssl_conf_authmode` (HIGH).
+  The *correct* APIs (`SSL_get_verify_result`, `X509_check_host`,
+  `gnutls_certificate_verify_peers3`, `gnutls_session_set_verify_cert`) are not
+  flagged. Like CWE-327 and CWE-676 it is a *pure PLT-lookup* detector built on
+  the existing `_common.call_sites` helper — it deliberately does **not** read
+  the verify-mode argument out of the disassembly (the constant is frequently
+  loaded indirectly and reading it would require per-architecture data flow), so
+  the call to a verification-policy routine is itself the finding, surfaced at
+  the per-symbol confidence (HIGH→`high`, MEDIUM→`medium`) for triage. Zero new
+  infrastructure, architecture-agnostic (works on every arch radare2 can
+  disassemble). Registered as check `295`, so the `--checks {…,295,…,all}` token
+  and the `all` set wire in automatically through the `DETECTORS` dispatch dict;
+  SARIF maps CWE-295 to level `error`. Chosen as the next improvement because the
+  entire ranked backlog (items 1-8) plus every CLI/output-layer item had
+  shipped, and the previous gap-fill (CWE-327, R15) established broken-crypto
+  detection — improper certificate validation is the natural companion gap and
+  the highest-value PLT-only TLS class still missing (CWE-295 is a perennial
+  top-cited weakness in shipped binaries, especially the embedded/firmware
+  targets blight serves), while the remaining high-yield classes (CWE-190
+  integer overflow, CWE-416 use-after-free) still require symbolic execution /
+  heap modeling that is out of scope for blight's static PLT-and-disassembly
+  approach. See the `TestCwe295` block in `tests/test_detectors.py` and the
+  CWE-295 fixtures in `tests/fake_session.py`.
+
 - **CWE-327 — Use of a Broken or Risky Cryptographic Algorithm** (post-backlog;
   new static-analysis heuristic). `src/blight/detectors/cwe327.py` flags call
   sites to library routines that implement cryptographic primitives now
