@@ -192,6 +192,8 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 **MITRE 2025 CWE Top 25 signal:**
 - CWE-78 is #9 with 18 CISA KEV additions in 2025 — blight's coverage is well-placed.
+- CWE-89 (SQL injection) is a perennial Top-25 weakness — now covered via the
+  raw-SQL-execution PLT sinks (see Shipped: CWE-89).
 - CWE-120 NEW ENTRY at #11 — validates blight's v0.1 detector selection.
 - CWE-134 dropped off Top 25 but has very active CVE flow in embedded firmware (2025).
 - CWE-190 (integer overflow) dropped off Top 25 and requires symbolic execution for
@@ -207,6 +209,42 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 ---
 
 ## Shipped
+
+- **CWE-89 — SQL Injection** (post-backlog; new static-analysis heuristic).
+  `src/blight/detectors/cwe89.py` flags call sites to database-client routines
+  that execute a SQL statement supplied as a string — the *sink* of every
+  SQL-injection vulnerability. Covered: SQLite (`sqlite3_exec` and the
+  printf-formatting helpers `sqlite3_mprintf`/`sqlite3_vmprintf` — HIGH; the
+  prepare gateways `sqlite3_prepare`/`_v2`/`_v3` — MEDIUM, they *can* be used
+  safely with bound parameters), MySQL/MariaDB (`mysql_query`/`mysql_real_query`
+  — HIGH), PostgreSQL/libpq (`PQexec` — HIGH), and ODBC
+  (`SQLExecDirect`/`SQLExecDirectW` — HIGH; `SQLPrepare` — MEDIUM). The *safe*
+  parameterised APIs (`sqlite3_bind_*`, `sqlite3_step`, `mysql_stmt_bind_param`,
+  `PQexecParams`/`PQprepare`/`PQexecPrepared`, `SQLBindParameter`) are
+  deliberately **not** flagged — flagging them would invert the signal. Like
+  CWE-78, CWE-327, CWE-295 and CWE-676 it is a *pure PLT-lookup* detector built
+  on the existing `_common.call_sites` helper: it deliberately does **not** read
+  the query argument out of the disassembly to prove it is non-constant (unlike
+  the single-`rdi` OS-command case, the query string arrives in different
+  argument positions across the many DB libraries and is frequently built across
+  basic blocks, so per-library/per-architecture data flow would buy marginal
+  precision), so the call to a raw-SQL-execution routine is itself the finding,
+  surfaced at the per-symbol confidence (HIGH→`high`, MEDIUM→`medium`) for
+  triage. Zero new infrastructure, architecture-agnostic (works on every arch
+  radare2 can disassemble). Registered as check `89`, so the
+  `--checks {…,89,…,all}` token and the `all` set wire in automatically through
+  the `DETECTORS` dispatch dict; SARIF maps CWE-89 to level `error`. Chosen as
+  the next improvement because the entire ranked backlog (items 1-8) plus every
+  CLI/output-layer item had shipped and the previous gap-fills built out the
+  injection/crypto/TLS families (CWE-78 command injection, CWE-327 broken crypto,
+  CWE-295 improper cert validation) — SQL injection is the natural companion to
+  CWE-78 (both are "untrusted data reaches an interpreter" sinks), is a perennial
+  MITRE Top-25 weakness, and is the highest-value PLT-only class still missing,
+  while the remaining high-yield classes (CWE-190 integer overflow, CWE-416
+  use-after-free) still require symbolic execution / heap modeling that is out of
+  scope for blight's static PLT-and-disassembly approach. See the `TestCwe89`
+  block in `tests/test_detectors.py` and the CWE-89 fixtures in
+  `tests/fake_session.py`.
 
 - **CWE-295 — Improper Certificate Validation** (post-backlog; new
   static-analysis heuristic). `src/blight/detectors/cwe295.py` flags call sites
