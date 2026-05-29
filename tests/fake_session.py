@@ -2257,3 +2257,178 @@ def cwe798_all_session() -> FakeR2Session:
             Str(vaddr=0x402110, string="username=guest", section=".rodata"),
         ]
     )
+
+
+# --- CWE-197 (Numeric Truncation Error) fixtures ---------------------------
+#
+# These exercise the PLT-anchored, single-function forward scan: a libc routine
+# whose return type is wider than ``int`` (size_t/ssize_t/long) returns a 64-bit
+# value in the return register (rax on x86_64, x0 on AArch64), and the program's
+# first use of that value either truncates it (stores/moves the narrow
+# sub-register) or keeps it whole (full-width use / re-extension).
+
+def cwe197_strlen_truncated_session() -> FakeR2Session:
+    """x86_64: `int n = strlen(s);` — strlen's size_t result (rax) stored as the
+    32-bit eax into a dword stack slot (truncation)."""
+    imports = [Import(name="strlen", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401152, "CALL", "process", "call sym.imp.strlen")]}
+    ops = [
+        Instruction(0x401140, "push rbp"),
+        Instruction(0x401148, "mov rdi, qword [rbp - 0x18]"),  # the string
+        Instruction(0x401152, "call sym.imp.strlen"),          # rax = size_t len
+        Instruction(0x401157, "mov dword [rbp - 0x4], eax"),   # int n = (truncate)
+        Instruction(0x40115a, "leave"),
+        Instruction(0x40115b, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401140: ops})
+
+
+def cwe197_read_truncated_session() -> FakeR2Session:
+    """x86_64: `int n = read(fd, buf, len);` — read's ssize_t result truncated
+    into a dword slot."""
+    imports = [Import(name="read", plt=0x401050)]
+    xrefs = {0x401050: [Xref(0x401210, "CALL", "recv_loop", "call sym.imp.read")]}
+    ops = [
+        Instruction(0x401200, "push rbp"),
+        Instruction(0x401208, "mov edx, dword [rbp - 0x8]"),
+        Instruction(0x401210, "call sym.imp.read"),            # rax = ssize_t
+        Instruction(0x401215, "mov dword [rbp - 0xc], eax"),   # int n = (truncate)
+        Instruction(0x401218, "leave"),
+        Instruction(0x401219, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401200: ops})
+
+
+def cwe197_word_store_truncated_session() -> FakeR2Session:
+    """x86_64: strtoul's unsigned long result stored as a 16-bit word (severe
+    truncation into a `short`/`uint16_t`)."""
+    imports = [Import(name="strtoul", plt=0x401060)]
+    xrefs = {0x401060: [Xref(0x401320, "CALL", "parse", "call sym.imp.strtoul")]}
+    ops = [
+        Instruction(0x401300, "push rbp"),
+        Instruction(0x401318, "mov rdi, qword [rbp - 0x18]"),
+        Instruction(0x401320, "call sym.imp.strtoul"),         # rax = unsigned long
+        Instruction(0x401326, "mov word [rbp - 0x2], ax"),     # uint16_t = (truncate)
+        Instruction(0x40132a, "leave"),
+        Instruction(0x40132b, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401300: ops})
+
+
+def cwe197_fullwidth_safe_session() -> FakeR2Session:
+    """x86_64: strlen's result kept at full width (`mov qword [..], rax`, then a
+    64-bit compare) — no truncation, must NOT fire."""
+    imports = [Import(name="strlen", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401152, "CALL", "process", "call sym.imp.strlen")]}
+    ops = [
+        Instruction(0x401140, "push rbp"),
+        Instruction(0x401152, "call sym.imp.strlen"),
+        Instruction(0x401157, "mov qword [rbp - 0x8], rax"),   # size_t kept (64-bit)
+        Instruction(0x40115b, "cmp rax, 0x10"),                # full-width compare
+        Instruction(0x40115f, "leave"),
+        Instruction(0x401160, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401140: ops})
+
+
+def cwe197_reextended_safe_session() -> FakeR2Session:
+    """x86_64: read's result narrowed to eax but immediately sign-extended back
+    (`cdqe` / `movsxd`) — the magnitude is preserved, must NOT fire."""
+    imports = [Import(name="read", plt=0x401050)]
+    xrefs = {0x401050: [Xref(0x401210, "CALL", "recv_loop", "call sym.imp.read")]}
+    ops = [
+        Instruction(0x401200, "push rbp"),
+        Instruction(0x401210, "call sym.imp.read"),
+        Instruction(0x401215, "cdqe"),                          # re-extend eax->rax
+        Instruction(0x401217, "mov qword [rbp - 0x8], rax"),
+        Instruction(0x40121b, "leave"),
+        Instruction(0x40121c, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401200: ops})
+
+
+def cwe197_movsxd_reextended_safe_session() -> FakeR2Session:
+    """x86_64: strtol's result re-extended via `movsxd rbx, eax` — preserved."""
+    imports = [Import(name="strtol", plt=0x401070)]
+    xrefs = {0x401070: [Xref(0x401410, "CALL", "parse", "call sym.imp.strtol")]}
+    ops = [
+        Instruction(0x401400, "push rbp"),
+        Instruction(0x401410, "call sym.imp.strtol"),
+        Instruction(0x401415, "movsxd rbx, eax"),               # re-extend
+        Instruction(0x401418, "mov qword [rbp - 0x8], rbx"),
+        Instruction(0x40141c, "leave"),
+        Instruction(0x40141d, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401400: ops})
+
+
+def cwe197_no_wide_returner_session() -> FakeR2Session:
+    """x86_64: a narrowing store, but the source call is `atoi` (returns int) —
+    not a wide-return routine, so there is nothing to truncate. Must NOT fire."""
+    imports = [Import(name="atoi", plt=0x401080)]
+    xrefs = {0x401080: [Xref(0x401510, "CALL", "parse", "call sym.imp.atoi")]}
+    ops = [
+        Instruction(0x401500, "push rbp"),
+        Instruction(0x401510, "call sym.imp.atoi"),             # int, not wide
+        Instruction(0x401515, "mov dword [rbp - 0x4], eax"),    # storing an int as int
+        Instruction(0x401519, "leave"),
+        Instruction(0x40151a, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401500: ops})
+
+
+def cwe197_arm64_truncated_session() -> FakeR2Session:
+    """AArch64: `int n = strlen(s);` — strlen's x0 result stored as the 32-bit w0
+    into a stack slot (truncation)."""
+    imports = [Import(name="strlen", plt=0x710)]
+    xrefs = {0x710: [Xref(0x848, "CALL", "process", "bl sym.imp.strlen")]}
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x840, "ldr x0, [x29, 0x18]"),
+        Instruction(0x848, "bl sym.imp.strlen"),               # x0 = size_t len
+        Instruction(0x84c, "str w0, [x29, 0x4]"),              # int n = (truncate w0)
+        Instruction(0x850, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x854, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe197_arm64_fullwidth_safe_session() -> FakeR2Session:
+    """AArch64: strlen's x0 result stored at full width (`str x0, [..]`) — no
+    truncation, must NOT fire."""
+    imports = [Import(name="strlen", plt=0x710)]
+    xrefs = {0x710: [Xref(0x848, "CALL", "process", "bl sym.imp.strlen")]}
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x848, "bl sym.imp.strlen"),
+        Instruction(0x84c, "str x0, [x29, 0x8]"),              # 64-bit store
+        Instruction(0x850, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x854, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe197_multi_call_session() -> FakeR2Session:
+    """Two wide-return call sites in two functions: one truncates (flag), one
+    keeps full width (skip)."""
+    vuln_imports = Import(name="strlen", plt=0x401040)
+    safe_imports = Import(name="read", plt=0x401050)
+    xrefs = {
+        0x401040: [Xref(0x401152, "CALL", "trunc_fn", "call sym.imp.strlen")],
+        0x401050: [Xref(0x401252, "CALL", "safe_fn", "call sym.imp.read")],
+    }
+    trunc_ops = [
+        Instruction(0x401152, "call sym.imp.strlen"),
+        Instruction(0x401157, "mov dword [rbp - 0x4], eax"),   # truncate → flag
+        Instruction(0x40115b, "ret"),
+    ]
+    safe_ops = [
+        Instruction(0x401252, "call sym.imp.read"),
+        Instruction(0x401257, "mov qword [rbp - 0x8], rax"),   # full width → skip
+        Instruction(0x40125b, "ret"),
+    ]
+    return FakeR2Session(
+        imports=[vuln_imports, safe_imports],
+        xrefs=xrefs,
+        functions={0x401152: trunc_ops, 0x401252: safe_ops},
+    )
