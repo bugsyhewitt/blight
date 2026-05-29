@@ -136,7 +136,7 @@ is, not how severe the bug would be if exploited:
 |---|---|---|
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
-| `low` | The pattern is weakly indicative. | CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-676 (LOW-severity symbols) |
+| `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
@@ -304,9 +304,9 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-22, CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-362,
-CWE-369, CWE-415, CWE-416, CWE-426, CWE-476, CWE-676, and CWE-798 were added
-post-v0.1 (see [POST_V01.md](POST_V01.md)).
+in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-252, CWE-295, CWE-327,
+CWE-362, CWE-369, CWE-415, CWE-416, CWE-426, CWE-476, CWE-676, and CWE-798 were
+added post-v0.1 (see [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
 
@@ -463,6 +463,59 @@ $ blight --binary ./service --checks 119 --format json
       "evidence": "[HIGH] call to memcpy: memcpy copies a caller-supplied length — confirm the length cannot exceed the destination size; a wrong length is an out-of-bounds write",
       "symbol": "memcpy",
       "confidence": "high"
+    }
+  ]
+}
+```
+
+### CWE-122 — Heap-Based Buffer Overflow
+
+Flags the statically-detectable heap-overflow shape: a **heap buffer** is
+obtained from an allocator (`malloc`, `calloc`, `realloc`, `reallocarray`,
+`strdup`, `strndup`, `aligned_alloc`, `valloc`, `pvalloc`, `memalign`), and that
+same pointer is then handed — in the **destination** (first-argument) register —
+to an **unbounded** copy routine (`strcpy`, `stpcpy`, `strcat`, `sprintf`,
+`vsprintf`, `gets`) in the same function with no intervening size-aware
+reassignment. The allocation fixes the destination's size; an unbounded copy
+writes the full length of the source, so a fixed-size heap buffer used as the
+destination of a length-unaware copy can be overflowed on the heap.
+
+This is the same in-function, forward-scan, register-alias machinery proven by
+[CWE-416](#cwe-416--use-after-free) and CWE-476, except the tracked pointer is
+seeded from the **allocator return register** (`rax` on x86_64, `x0` on AArch64)
+and the sink is an unbounded copy whose destination register still aliases the
+heap buffer. A register-to-register move propagates the alias (`mov rbx, rax`
+then `strcpy(rbx, …)` is still caught); storing the pointer away or overwriting
+the destination register with a different buffer kills the alias (safe).
+
+Deliberately distinct from [CWE-120](#cwe-120--buffer-copy-without-checking-size-of-input):
+CWE-120 flags *every* call to a dangerous copy regardless of where it writes,
+because the function's presence is the finding. CWE-122 is the narrower,
+heap-specific signal — it fires only when the copy's destination is provably a
+same-function heap allocation, which is precisely what makes the overflow land
+on the heap. A single call site can legitimately carry both findings. **Bounded**
+copies (`strncpy`/`snprintf`/`memcpy` with an explicit length) are intentionally
+**not** flagged here: judging whether the length is correct needs value-range
+analysis that is out of scope; those remain CWE-120's broader territory.
+
+Because reachability of the copy along the allocated path is not proven
+statically (an intervening branch may resize on a path we cannot see), every
+CWE-122 finding is `low` confidence — matching CWE-415 / CWE-416 / CWE-476. The
+detector is architecture-aware on x86_64 and AArch64.
+
+```bash
+$ blight --binary path/to/elf --checks 122 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [122],
+  "findings": [
+    {
+      "cwe": 122,
+      "function": "build",
+      "address": "0x401150",
+      "evidence": "heap buffer from malloc is the destination of an unbounded copy in the same function without an intervening size-aware reassignment (possible heap buffer overflow)",
+      "symbol": "malloc",
+      "confidence": "low"
     }
   ]
 }

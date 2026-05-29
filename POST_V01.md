@@ -214,6 +214,56 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **CWE-122 — Heap-Based Buffer Overflow** (post-backlog; the heap-specific
+  refinement of CWE-120, built on the single-function alias-tracking machinery
+  shared by CWE-416 / CWE-415 / CWE-476).
+  `src/blight/detectors/cwe122.py` flags the statically-detectable heap
+  overflow: a heap buffer obtained from an allocator (`malloc` / `calloc` /
+  `realloc` / `reallocarray` / `strdup` / `strndup` / `aligned_alloc` / `valloc`
+  / `pvalloc` / `memalign`) that is then handed — in the **destination**
+  (first-argument) register — to an **unbounded** copy (`strcpy` / `stpcpy` /
+  `strcat` / `sprintf` / `vsprintf` / `gets`) in the same function with no
+  intervening size-aware reassignment. The allocation fixes the destination
+  size; an unbounded copy writes the full source length, so a fixed-size heap
+  buffer used as a length-unaware copy destination can overflow on the heap.
+  Chosen over CWE-457 (uninitialized variable use): a precise CWE-457 detector
+  needs def-use dataflow over stack slots across basic blocks (which path
+  initialised which slot before which read) — that is the CFG/value-flow
+  modeling POST_V01 repeatedly records as out of scope — whereas heap overflow
+  reduces to the *same* in-function forward-scan-with-register-alias-tracking
+  shape already proven by CWE-416/CWE-415, so it lands as a small,
+  infrastructure-free PR. The detector seeds the alias set with the allocator
+  **return** register (`rax` on x86_64, `x0` on AArch64) and scans forward: a
+  register-to-register move propagates the heap alias (`mov rbx, rax` then
+  `strcpy(rbx, …)` is still caught); storing the pointer away or overwriting a
+  live alias with a different/bare value kills it; an unbounded copy reached
+  while the **destination** (first-argument) register still aliases the heap
+  buffer is flagged. Deliberately distinct from CWE-120, which flags the
+  dangerous copy *unconditionally* (its presence is the finding) — CWE-122
+  requires the destination to be a provable same-function heap allocation, the
+  precise heap-overflow signal, so a call site can legitimately carry both.
+  **Bounded** copies (`strncpy`/`snprintf`/`memcpy` with an explicit length) are
+  intentionally NOT sinks here: vetting the length needs value-range analysis
+  that is out of scope, and they remain CWE-120's broader territory. `realloc` /
+  `reallocarray` are included as allocators because their *return* value is the
+  live (possibly moved) heap buffer, which is exactly what is seeded — unlike in
+  CWE-416/CWE-415 where `realloc` is excluded because there it is the *argument*
+  that is the dangling/old pointer. Architecture-aware on x86_64 and AArch64
+  (POST_V01 item 5), resolved through the shared `_argregs.arg_register_aliases`
+  table. Because reachability of the copy along the allocated path is not proven
+  statically, every CWE-122 finding is `low` confidence, matching CWE-415 /
+  CWE-416 / CWE-476 policy. Registered as check `122`, so the `--checks {…,122,
+  all}` token and the `all` set wire in automatically through the `DETECTORS`
+  dispatch dict; SARIF maps CWE-122 to level `error`. 8 new unit tests
+  (`tests/test_detectors.py::TestCwe122`) covering the direct
+  malloc→strcpy overflow, the alias-propagated calloc→sprintf overflow, the
+  bounded-copy safe case, the destination-reassigned safe case, the
+  never-copied safe case, the no-allocator-import / clean-baseline negatives,
+  and the AArch64 vuln + bounded-safe pair; the `--checks all` (`test_cli`) and
+  SARIF level-mapping (`test_sarif`) assertions were updated to include `122`.
+  Unit test count 357 → 367 (8 detector tests + the added `122` rows in the
+  `test_resolve_all` list and the SARIF level-mapping parametrization).
+
 - **CWE-415 — Double Free** (post-backlog; the narrower sibling of CWE-416,
   sharing its single-function alias-tracking machinery).
   `src/blight/detectors/cwe415.py` flags the statically-detectable double-free:

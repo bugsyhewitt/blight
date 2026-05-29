@@ -8,6 +8,7 @@ from blight.detectors import (
     cwe89,
     cwe119,
     cwe120,
+    cwe122,
     cwe134,
     cwe242,
     cwe252,
@@ -96,6 +97,14 @@ from tests.fake_session import (
     cwe415_no_free_imports_session,
     arm64_double_free_vuln_session,
     arm64_double_free_nulled_session,
+    malloc_strcpy_heap_overflow_vuln_session,
+    calloc_sprintf_heap_overflow_vuln_session,
+    malloc_strncpy_bounded_session,
+    malloc_reassigned_before_copy_session,
+    malloc_no_copy_session,
+    cwe122_no_allocator_imports_session,
+    arm64_malloc_strcpy_heap_overflow_vuln_session,
+    arm64_malloc_strncpy_bounded_session,
     access_toctou_vuln_session,
     faccessat_toctou_vuln_session,
     stat_toctou_vuln_session,
@@ -1363,3 +1372,56 @@ class TestCwe416:
 
     def test_arm64_does_not_flag_when_pointer_nulled(self) -> None:
         assert cwe416.detect(arm64_free_then_null_assign_session()) == []
+
+
+class TestCwe122:
+    """CWE-122 heap-based buffer overflow — in-function alias tracking from an
+    allocator return register into an unbounded-copy destination."""
+
+    def test_flags_malloc_into_strcpy(self) -> None:
+        findings = cwe122.detect(malloc_strcpy_heap_overflow_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 122
+        assert f.symbol == "malloc"
+        assert f.function == "build"
+        assert f.address == hex(0x401150)
+        assert "heap buffer overflow" in f.evidence
+        assert f.confidence == "low"
+
+    def test_flags_calloc_into_sprintf_through_alias(self) -> None:
+        # rbx = rax alias propagation; rdi = rbx; sprintf(rdi, ...) is the sink.
+        findings = cwe122.detect(calloc_sprintf_heap_overflow_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "calloc"
+        assert f.function == "fmt"
+
+    def test_does_not_flag_bounded_copy(self) -> None:
+        # strncpy is bounded (explicit length) — that is CWE-120's territory.
+        assert cwe122.detect(malloc_strncpy_bounded_session()) == []
+
+    def test_does_not_flag_when_dest_reassigned(self) -> None:
+        # The heap pointer is stored away and a different (stack) dest is copied.
+        assert cwe122.detect(malloc_reassigned_before_copy_session()) == []
+
+    def test_does_not_flag_when_no_copy(self) -> None:
+        # The heap pointer is never fed to a copy routine.
+        assert cwe122.detect(malloc_no_copy_session()) == []
+
+    def test_no_allocator_imports_no_findings(self) -> None:
+        assert cwe122.detect(cwe122_no_allocator_imports_session()) == []
+
+    def test_clean_baseline_no_findings(self) -> None:
+        assert cwe122.detect(clean_baseline_session()) == []
+
+    def test_arm64_flags_malloc_into_strcpy(self) -> None:
+        findings = cwe122.detect(arm64_malloc_strcpy_heap_overflow_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 122
+        assert f.symbol == "malloc"
+        assert f.function == "build"
+
+    def test_arm64_does_not_flag_bounded_copy(self) -> None:
+        assert cwe122.detect(arm64_malloc_strncpy_bounded_session()) == []
