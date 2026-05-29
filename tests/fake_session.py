@@ -1558,6 +1558,169 @@ def cwe798_no_strings_session() -> FakeR2Session:
     return _strings_session([])
 
 
+# --- CWE-416 use-after-free fixtures ---------------------------------------
+#
+# Pattern: a pointer is passed to free() in the first-argument register (rdi on
+# x86_64, x0 on AArch64). Vulnerable cases read that register again — deref a
+# memory operand through it, or pass it to another call — with no intervening
+# reassignment. Safe cases reassign the freed register (mov rdi, 0 / xor / a
+# fresh reload) before any use, or never touch it again.
+
+def free_then_deref_vuln_session() -> FakeR2Session:
+    """free(rdi) then `mov rax, [rdi]` — deref the freed pointer (vulnerable)."""
+    imports = [Import(name="free", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "use_after", "call sym.imp.free")]}
+    use_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),  # rdi = ptr
+        Instruction(0x401150, "call sym.imp.free"),
+        Instruction(0x401155, "mov rax, qword [rdi]"),         # deref freed ptr
+        Instruction(0x40115c, "leave"),
+        Instruction(0x40115d, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: use_ops})
+
+
+def free_then_null_assign_session() -> FakeR2Session:
+    """free(rdi); rdi = 0 before any use — the canonical ptr=NULL (safe)."""
+    imports = [Import(name="free", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "tidy", "call sym.imp.free")]}
+    tidy_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401150, "call sym.imp.free"),
+        Instruction(0x401155, "mov rdi, 0"),                   # reassign → kill alias
+        Instruction(0x40115c, "mov rax, rdi"),                 # later read is of NULL
+        Instruction(0x40115f, "leave"),
+        Instruction(0x401160, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: tidy_ops})
+
+
+def free_then_xor_zero_session() -> FakeR2Session:
+    """free(rdi); xor rdi, rdi before any use — zeroed alias (safe)."""
+    imports = [Import(name="free", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "tidy", "call sym.imp.free")]}
+    tidy_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401150, "call sym.imp.free"),
+        Instruction(0x401155, "xor rdi, rdi"),                 # zero → kill alias
+        Instruction(0x401158, "mov qword [rbp - 0x8], rdi"),   # store NULL back
+        Instruction(0x40115f, "leave"),
+        Instruction(0x401160, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: tidy_ops})
+
+
+def free_then_aliased_deref_vuln_session() -> FakeR2Session:
+    """free(rdi); rbx = rdi; deref via rbx — alias propagation (vulnerable)."""
+    imports = [Import(name="free", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "use_alias", "call sym.imp.free")]}
+    use_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401150, "call sym.imp.free"),
+        Instruction(0x401155, "mov rbx, rdi"),                 # alias: rbx = freed ptr
+        Instruction(0x401158, "mov rcx, qword [rbx]"),          # deref via alias
+        Instruction(0x40115f, "leave"),
+        Instruction(0x401160, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: use_ops})
+
+
+def free_then_pass_to_call_vuln_session() -> FakeR2Session:
+    """free(rdi); then call puts while rdi still holds the freed ptr (vulnerable)."""
+    imports = [
+        Import(name="free", plt=0x401040),
+        Import(name="puts", plt=0x401050),
+    ]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "dbl_use", "call sym.imp.free")]}
+    use_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401150, "call sym.imp.free"),
+        Instruction(0x401155, "call sym.imp.puts"),            # rdi still freed ptr
+        Instruction(0x40115a, "leave"),
+        Instruction(0x40115b, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: use_ops})
+
+
+def free_then_reassigned_before_call_session() -> FakeR2Session:
+    """free(rdi); rdi reloaded with a fresh value before the next call (safe)."""
+    imports = [
+        Import(name="free", plt=0x401040),
+        Import(name="puts", plt=0x401050),
+    ]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "reload", "call sym.imp.free")]}
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401150, "call sym.imp.free"),
+        Instruction(0x401155, "lea rdi, str.done"),            # fresh value → kill alias
+        Instruction(0x40115c, "call sym.imp.puts"),            # passes the fresh ptr
+        Instruction(0x401161, "leave"),
+        Instruction(0x401162, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def free_then_unused_session() -> FakeR2Session:
+    """free(rdi); the freed register is never read again (safe — nothing to flag)."""
+    imports = [Import(name="free", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401150, "CALL", "release", "call sym.imp.free")]}
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401150, "call sym.imp.free"),
+        Instruction(0x401155, "mov eax, 0"),                   # unrelated work
+        Instruction(0x40115a, "leave"),
+        Instruction(0x40115b, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe416_no_free_imports_session() -> FakeR2Session:
+    """A session with no deallocator imports — nothing to flag."""
+    imports = [
+        Import(name="malloc", plt=0x401030),
+        Import(name="puts", plt=0x401040),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
+def arm64_free_then_deref_vuln_session() -> FakeR2Session:
+    """AArch64: free(x0) then `ldr x1, [x0]` — deref freed ptr (vulnerable)."""
+    imports = [Import(name="free", plt=0x710)]
+    xrefs = {0x710: [Xref(0x83c, "CALL", "use_after", "bl sym.imp.free")]}
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x838, "ldr x0, [x29, 0x18]"),             # x0 = ptr
+        Instruction(0x83c, "bl sym.imp.free"),
+        Instruction(0x840, "ldr x1, [x0]"),                     # deref freed ptr
+        Instruction(0x844, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x848, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def arm64_free_then_null_assign_session() -> FakeR2Session:
+    """AArch64: free(x0); x0 = 0 before any use — ptr=NULL (safe)."""
+    imports = [Import(name="free", plt=0x710)]
+    xrefs = {0x710: [Xref(0x83c, "CALL", "tidy", "bl sym.imp.free")]}
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x838, "ldr x0, [x29, 0x18]"),
+        Instruction(0x83c, "bl sym.imp.free"),
+        Instruction(0x840, "mov x0, 0"),                        # reassign → kill alias
+        Instruction(0x844, "str x0, [x29, 0x18]"),              # store NULL back
+        Instruction(0x848, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x84c, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
 def cwe798_all_session() -> FakeR2Session:
     """A mix of every CWE-798 signal in one binary, plus benign neighbours."""
     return _strings_session(

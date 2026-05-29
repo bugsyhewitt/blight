@@ -15,6 +15,7 @@ from blight.detectors import (
     cwe327,
     cwe362,
     cwe369,
+    cwe416,
     cwe426,
     cwe476,
     cwe676,
@@ -75,6 +76,16 @@ from tests.fake_session import (
     arm64_udiv_checked_session,
     cwe369_multi_function_session,
     cwe369_clean_session,
+    free_then_deref_vuln_session,
+    free_then_null_assign_session,
+    free_then_xor_zero_session,
+    free_then_aliased_deref_vuln_session,
+    free_then_pass_to_call_vuln_session,
+    free_then_reassigned_before_call_session,
+    free_then_unused_session,
+    cwe416_no_free_imports_session,
+    arm64_free_then_deref_vuln_session,
+    arm64_free_then_null_assign_session,
     access_toctou_vuln_session,
     faccessat_toctou_vuln_session,
     stat_toctou_vuln_session,
@@ -1223,3 +1234,66 @@ class TestCwe362:
         # Only fd-based/atomic primitives (fstat, openat) and a use sink (open)
         # are imported — no check-by-path primitive is present.
         assert cwe362.detect(cwe362_clean_session()) == []
+
+
+class TestCwe416:
+    """CWE-416 use-after-free — in-function forward scan with alias tracking."""
+
+    def test_flags_deref_of_freed_pointer(self) -> None:
+        findings = cwe416.detect(free_then_deref_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 416
+        assert f.symbol == "free"
+        assert f.function == "use_after"
+        assert f.address == hex(0x401150)
+        assert "use-after-free" in f.evidence
+        assert f.confidence == "low"
+
+    def test_does_not_flag_when_pointer_nulled(self) -> None:
+        # mov rdi, 0 after free severs the dangling alias → safe.
+        assert cwe416.detect(free_then_null_assign_session()) == []
+
+    def test_does_not_flag_when_pointer_xored_zero(self) -> None:
+        # xor rdi, rdi zeroes the register → alias killed → safe.
+        assert cwe416.detect(free_then_xor_zero_session()) == []
+
+    def test_flags_deref_through_alias(self) -> None:
+        # rbx = rdi propagates the dangling alias; deref via rbx is still UAF.
+        findings = cwe416.detect(free_then_aliased_deref_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "free"
+        assert f.function == "use_alias"
+
+    def test_flags_freed_pointer_passed_to_call(self) -> None:
+        # A following call while rdi still holds the freed pointer is a use.
+        findings = cwe416.detect(free_then_pass_to_call_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "free"
+        assert findings[0].function == "dbl_use"
+
+    def test_does_not_flag_when_reassigned_before_call(self) -> None:
+        # rdi reloaded with a fresh value before the next call → safe.
+        assert cwe416.detect(free_then_reassigned_before_call_session()) == []
+
+    def test_does_not_flag_when_pointer_unused(self) -> None:
+        # The freed register is never read again → nothing to flag.
+        assert cwe416.detect(free_then_unused_session()) == []
+
+    def test_no_free_imports_no_findings(self) -> None:
+        assert cwe416.detect(cwe416_no_free_imports_session()) == []
+
+    def test_clean_baseline_no_findings(self) -> None:
+        assert cwe416.detect(clean_baseline_session()) == []
+
+    def test_arm64_flags_deref_of_freed_pointer(self) -> None:
+        findings = cwe416.detect(arm64_free_then_deref_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 416
+        assert f.symbol == "free"
+        assert f.function == "use_after"
+
+    def test_arm64_does_not_flag_when_pointer_nulled(self) -> None:
+        assert cwe416.detect(arm64_free_then_null_assign_session()) == []
