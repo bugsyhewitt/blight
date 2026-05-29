@@ -208,6 +208,36 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **CWE-327 — Use of a Broken or Risky Cryptographic Algorithm** (post-backlog;
+  new static-analysis heuristic). `src/blight/detectors/cwe327.py` flags call
+  sites to library routines that implement cryptographic primitives now
+  considered broken or risky: collision-broken hashes (`MD5`/`MD4`/`MD2` and
+  their incremental `_Init`/`_Update`/`_Final` forms, `SHA`/`SHA1` likewise —
+  all HIGH), legacy/broken ciphers (single-DES `DES_ecb_encrypt`/
+  `DES_ncbc_encrypt`/`DES_cbc_encrypt`/`DES_set_key`/`DES_crypt` and `RC4`/
+  `RC4_set_key` — HIGH; Blowfish `BF_ecb_encrypt`/`BF_cbc_encrypt`/`BF_set_key`
+  — MEDIUM), and predictable randomness used for crypto (`srand`/`random`/
+  `srandom` — MEDIUM). Like CWE-676 it is a *pure PLT-lookup* detector built on
+  the existing `_common.call_sites` helper — the symbol is the finding, no
+  data-flow context is needed — so it required zero new infrastructure and is
+  architecture-agnostic (works on every arch radare2 can disassemble). The
+  per-symbol severity is surfaced in the evidence string and mapped to the
+  triage confidence label (HIGH→`high`, MEDIUM→`medium`), mirroring the CWE-676
+  policy; SARIF maps CWE-327 to level `error`. Registered as check `327`, so the
+  `--checks {…,327,…,all}` token and the `all` set wire in automatically through
+  the `DETECTORS` dispatch dict. Chosen as the next improvement because the
+  entire ranked backlog (items 1-8) plus every post-backlog CLI/output-layer
+  item (`--min-confidence`, `--fail-on`, `--format text`, `--output-file`) had
+  shipped, leaving "add a new statically-detectable CWE class" as the natural
+  next gap — and broken-cryptography detection is the highest-value PLT-only
+  class still missing (CWE-327 is a perennial top-cited weakness in shipped
+  binaries, especially the embedded/firmware targets blight serves), while the
+  remaining high-yield classes (CWE-190 integer overflow, CWE-416
+  use-after-free) still require symbolic execution / heap modeling that is out
+  of scope for blight's static PLT-and-disassembly approach. See the
+  `TestCwe327` block in `tests/test_detectors.py` and the CWE-327 fixtures in
+  `tests/fake_session.py`.
+
 - **`--output-file` / `-o` Report Destination** (post-backlog; CLI ergonomics
   gap fill). Adds an `--output-file FILE` (short `-o FILE`) flag that writes the
   rendered report to a file instead of stdout; when set, nothing is printed to

@@ -324,6 +324,90 @@ def cwe676_clean_session() -> FakeR2Session:
     return FakeR2Session(imports, xrefs={})
 
 
+# --- CWE-327 broken/risky-cryptography fixtures ----------------------------
+#
+# Pure PLT-lookup detector (same shape as CWE-676): the presence of a call to a
+# broken hash / cipher / weak-randomness routine is the finding. No data flow.
+
+def md5_vuln_session() -> FakeR2Session:
+    """A single MD5() call (collision-broken hash)."""
+    imports = [Import(name="MD5", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "hash_pw", "call sym.imp.MD5")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def sha1_vuln_session() -> FakeR2Session:
+    """A single SHA1() call (collision-broken hash)."""
+    imports = [Import(name="SHA1", plt=0x401050)]
+    xrefs = {0x401050: [Xref(0x401172, "CALL", "sign_blob", "call sym.imp.SHA1")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def des_vuln_session() -> FakeR2Session:
+    """A single DES_ecb_encrypt() call (single-DES, 56-bit key)."""
+    imports = [Import(name="DES_ecb_encrypt", plt=0x401060)]
+    xrefs = {
+        0x401060: [Xref(0x401184, "CALL", "encrypt_block", "call sym.imp.DES_ecb_encrypt")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def rc4_vuln_session() -> FakeR2Session:
+    """A single RC4() call (biased keystream)."""
+    imports = [Import(name="RC4", plt=0x401070)]
+    xrefs = {0x401070: [Xref(0x401196, "CALL", "stream_cipher", "call sym.imp.RC4")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def blowfish_vuln_session() -> FakeR2Session:
+    """A single BF_cbc_encrypt() call (64-bit block cipher)."""
+    imports = [Import(name="BF_cbc_encrypt", plt=0x401080)]
+    xrefs = {
+        0x401080: [Xref(0x4011a8, "CALL", "encrypt_cbc", "call sym.imp.BF_cbc_encrypt")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def srand_vuln_session() -> FakeR2Session:
+    """A single srand() call (seeding a predictable PRNG)."""
+    imports = [Import(name="srand", plt=0x401090)]
+    xrefs = {0x401090: [Xref(0x4011ba, "CALL", "gen_key", "call sym.imp.srand")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe327_all_session() -> FakeR2Session:
+    """One call to each of six representative CWE-327 routines."""
+    imports = [
+        Import(name="MD5", plt=0x401040),
+        Import(name="SHA1", plt=0x401050),
+        Import(name="DES_ecb_encrypt", plt=0x401060),
+        Import(name="RC4", plt=0x401070),
+        Import(name="BF_cbc_encrypt", plt=0x401080),
+        Import(name="srand", plt=0x401090),
+        Import(name="snprintf", plt=0x4010a0),  # safe neighbour, must not fire
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "hash_pw", "call sym.imp.MD5")],
+        0x401050: [Xref(0x401172, "CALL", "sign_blob", "call sym.imp.SHA1")],
+        0x401060: [Xref(0x401184, "CALL", "encrypt_block", "call sym.imp.DES_ecb_encrypt")],
+        0x401070: [Xref(0x401196, "CALL", "stream_cipher", "call sym.imp.RC4")],
+        0x401080: [Xref(0x4011a8, "CALL", "encrypt_cbc", "call sym.imp.BF_cbc_encrypt")],
+        0x401090: [Xref(0x4011ba, "CALL", "gen_key", "call sym.imp.srand")],
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe327_clean_session() -> FakeR2Session:
+    """Only strong primitives imported — no CWE-327 routine present."""
+    imports = [
+        Import(name="SHA256", plt=0x401040),
+        Import(name="EVP_aes_256_gcm", plt=0x401050),
+        Import(name="getrandom", plt=0x401060),
+        Import(name="crypto_secretbox", plt=0x401070),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
 # --- CWE-476 NULL-pointer-dereference fixtures -----------------------------
 #
 # Pattern: an allocator (malloc/calloc/fopen/...) returns a pointer in rax.

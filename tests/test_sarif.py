@@ -127,6 +127,7 @@ class TestSarifLevelMapping:
         (120, "error"),
         (134, "error"),
         (242, "warning"),
+        (327, "error"),
         (676, "warning"),
         (999, "note"),    # unknown CWE defaults to note
     ])

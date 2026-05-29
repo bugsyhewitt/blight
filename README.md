@@ -43,13 +43,13 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {78,120,134,242,252,476,676,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {78,120,134,242,252,327,476,676,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
 - `--checks` — which CWE check to run; one of `78`, `120`, `134`, `242`, `252`,
-  `476`, `676`, or `all` (default: `all`)
+  `327`, `476`, `676`, or `all` (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
 - `--output-file FILE` (`-o FILE`) — write the report to `FILE` instead of
@@ -133,8 +133,8 @@ is, not how severe the bug would be if exploited:
 
 | Confidence | Meaning | Applies to |
 |---|---|---|
-| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-120, CWE-242, CWE-676 (HIGH-severity symbols) |
-| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-78, CWE-134, CWE-676 (MEDIUM-severity symbols) |
+| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-120, CWE-242, CWE-327 (HIGH-severity symbols), CWE-676 (HIGH-severity symbols) |
+| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-78, CWE-134, CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols) |
 | `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
@@ -303,8 +303,8 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-134, CWE-252, CWE-476, and CWE-676 were added post-v0.1 (see
-[POST_V01.md](POST_V01.md)).
+in v0.1; CWE-134, CWE-252, CWE-327, CWE-476, and CWE-676 were added post-v0.1
+(see [POST_V01.md](POST_V01.md)).
 
 ### CWE-78 — OS Command Injection
 
@@ -386,6 +386,45 @@ $ blight --binary tests/fixtures/gets-vuln --checks 242 --format json
   ]
 }
 ```
+
+### CWE-327 — Use of a Broken or Risky Cryptographic Algorithm
+
+Calls to library routines that implement cryptographic primitives now
+considered **broken or risky** for security use. Unlike a data-flow check, the
+*presence of the call itself* is the finding — linking against a known-broken
+hash, a legacy cipher, or a predictable random source is the signal. This is a
+pure PLT-lookup check (same shape as CWE-676); any matching call site is
+flagged and the severity is surfaced in the evidence string.
+
+| Family | Symbols | Severity | Why it's flagged | Use instead |
+|---|---|---|---|---|
+| Broken hashes | `MD5`/`MD4`/`MD2` (+ `_Init`/`_Update`/`_Final`), `SHA`/`SHA1` (+ `_Init`/`_Update`/`_Final`) | HIGH | Collision-broken | `SHA-256` / `SHA-3` |
+| Single-DES | `DES_ecb_encrypt`, `DES_ncbc_encrypt`, `DES_cbc_encrypt`, `DES_set_key`, `DES_crypt` | HIGH | 56-bit key, brute-forceable | `AES-GCM` |
+| RC4 | `RC4`, `RC4_set_key` | HIGH | Biased keystream | `AES-GCM` / `ChaCha20-Poly1305` |
+| Blowfish | `BF_ecb_encrypt`, `BF_cbc_encrypt`, `BF_set_key` | MEDIUM | 64-bit block (birthday bound) | `AES-GCM` |
+| Weak randomness | `srand`, `random`, `srandom` | MEDIUM | Predictable PRNG used for crypto | `getrandom()` / a CSPRNG |
+
+```bash
+$ blight --binary path/to/elf --checks 327 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [327],
+  "findings": [
+    {
+      "cwe": 327,
+      "function": "hash_pw",
+      "address": "0x401160",
+      "evidence": "[HIGH] call to MD5: Use of collision-broken MD5 hash; use SHA-256 or SHA-3",
+      "symbol": "MD5",
+      "confidence": "high"
+    }
+  ]
+}
+```
+
+The confidence mirrors the per-symbol severity (HIGH→`high`, MEDIUM→`medium`),
+the same policy as CWE-676. Because it is a pure PLT lookup it is
+architecture-agnostic and works on every architecture radare2 can disassemble.
 
 ### CWE-476 — NULL Pointer Dereference
 
@@ -503,8 +542,8 @@ $ blight --binary path/to/elf --checks 676 --format json
 
 `blight` supports **x86_64** and **AArch64 (arm64)** ELF binaries.
 
-The CWE-120, CWE-242, and CWE-676 detectors flag any call site to a dangerous
-symbol and are therefore architecture-agnostic — they work on every
+The CWE-120, CWE-242, CWE-327, and CWE-676 detectors flag any call site to a
+dangerous symbol and are therefore architecture-agnostic — they work on every
 architecture radare2 can disassemble. The CWE-78 and CWE-134 detectors inspect
 the register that carries a specific argument (the command string, the format
 string), and CWE-476 and CWE-252 inspect the *return* register (`rax`/`x0`) plus
