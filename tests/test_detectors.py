@@ -13,6 +13,7 @@ from blight.detectors import (
     cwe252,
     cwe295,
     cwe327,
+    cwe362,
     cwe369,
     cwe426,
     cwe476,
@@ -74,6 +75,12 @@ from tests.fake_session import (
     arm64_udiv_checked_session,
     cwe369_multi_function_session,
     cwe369_clean_session,
+    access_toctou_vuln_session,
+    faccessat_toctou_vuln_session,
+    stat_toctou_vuln_session,
+    lstat_toctou_vuln_session,
+    cwe362_all_session,
+    cwe362_clean_session,
     cwe426_all_session,
     cwe426_clean_session,
     dlopen_vuln_session,
@@ -1148,3 +1155,71 @@ class TestCwe369:
 
     def test_clean_session_no_findings(self) -> None:
         assert cwe369.detect(cwe369_clean_session()) == []
+
+
+class TestCwe362:
+    """CWE-362 TOCTOU check-then-use — pure PLT-lookup over check-by-path sinks."""
+
+    def test_flags_access(self) -> None:
+        findings = cwe362.detect(access_toctou_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 362
+        assert f.symbol == "access"
+        assert f.confidence == "medium"
+        assert "MEDIUM" in f.evidence
+        assert "TOCTOU" in f.evidence
+        assert f.address == hex(0x401160)
+
+    def test_flags_faccessat(self) -> None:
+        findings = cwe362.detect(faccessat_toctou_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 362
+        assert f.symbol == "faccessat"
+        assert f.confidence == "medium"
+
+    def test_flags_stat(self) -> None:
+        findings = cwe362.detect(stat_toctou_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "stat"
+        assert f.confidence == "medium"
+        assert "metadata" in f.evidence
+
+    def test_flags_lstat(self) -> None:
+        findings = cwe362.detect(lstat_toctou_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "lstat"
+        assert "O_NOFOLLOW" in f.evidence
+
+    def test_flags_all_check_primitives(self) -> None:
+        findings = cwe362.detect(cwe362_all_session())
+        symbols = {f.symbol for f in findings}
+        # All nine check-by-path primitives fire.
+        assert symbols == {
+            "access",
+            "faccessat",
+            "euidaccess",
+            "eaccess",
+            "stat",
+            "lstat",
+            "fstatat",
+            "stat64",
+            "lstat64",
+        }
+        # fstat (fd-based) and open (a use sink, not a check) must NOT fire.
+        assert "fstat" not in symbols
+        assert "open" not in symbols
+        assert len(findings) == 9
+        for f in findings:
+            assert f.cwe == 362
+            assert f.confidence == "medium"
+            assert f.address.startswith("0x")
+            assert f.evidence
+
+    def test_clean_session_no_findings(self) -> None:
+        # Only fd-based/atomic primitives (fstat, openat) and a use sink (open)
+        # are imported — no check-by-path primitive is present.
+        assert cwe362.detect(cwe362_clean_session()) == []

@@ -1369,6 +1369,86 @@ def cwe426_clean_session() -> FakeR2Session:
     return FakeR2Session(imports, xrefs={})
 
 
+# --- CWE-362 TOCTOU check-then-use fixtures --------------------------------
+#
+# Pure PLT-lookup detector (same shape as CWE-426 / CWE-22 / CWE-676): the
+# presence of a call to a check-by-path primitive (access/stat family) is the
+# finding. No data flow — the call site is where a time-of-check-to-time-of-use
+# race lands when the result gates a later use of the same path.
+
+def access_toctou_vuln_session() -> FakeR2Session:
+    """A single access() call (MEDIUM — permission check by path, classic TOCTOU)."""
+    imports = [Import(name="access", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "guarded_open", "call sym.imp.access")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def faccessat_toctou_vuln_session() -> FakeR2Session:
+    """A single faccessat() call (MEDIUM — by-name check still races without AT_*)."""
+    imports = [Import(name="faccessat", plt=0x401050)]
+    xrefs = {0x401050: [Xref(0x401172, "CALL", "check_at", "call sym.imp.faccessat")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def stat_toctou_vuln_session() -> FakeR2Session:
+    """A single stat() call (MEDIUM — metadata check by path, then act on it)."""
+    imports = [Import(name="stat", plt=0x401060)]
+    xrefs = {0x401060: [Xref(0x401184, "CALL", "inspect", "call sym.imp.stat")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def lstat_toctou_vuln_session() -> FakeR2Session:
+    """A single lstat() call (MEDIUM — symlink-aware metadata check by path)."""
+    imports = [Import(name="lstat", plt=0x401070)]
+    xrefs = {0x401070: [Xref(0x401196, "CALL", "probe_link", "call sym.imp.lstat")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe362_all_session() -> FakeR2Session:
+    """One call to each of the nine CWE-362 check primitives.
+
+    Includes safe neighbours (fstat — fd-based, never a path; and open) that
+    must NOT fire: fstat takes an fd and so cannot race on a name, and open is a
+    *use* sink (CWE-22's remit), not a check primitive.
+    """
+    imports = [
+        Import(name="access", plt=0x401040),
+        Import(name="faccessat", plt=0x401050),
+        Import(name="euidaccess", plt=0x401060),
+        Import(name="eaccess", plt=0x401070),
+        Import(name="stat", plt=0x401080),
+        Import(name="lstat", plt=0x401090),
+        Import(name="fstatat", plt=0x4010a0),
+        Import(name="stat64", plt=0x4010b0),
+        Import(name="lstat64", plt=0x4010c0),
+        Import(name="fstat", plt=0x4010d0),  # fd-based — must NOT fire
+        Import(name="open", plt=0x4010e0),   # a use sink, not a check — must NOT fire
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "guarded_open", "call sym.imp.access")],
+        0x401050: [Xref(0x401172, "CALL", "check_at", "call sym.imp.faccessat")],
+        0x401060: [Xref(0x401184, "CALL", "euid_check", "call sym.imp.euidaccess")],
+        0x401070: [Xref(0x401196, "CALL", "eacc_check", "call sym.imp.eaccess")],
+        0x401080: [Xref(0x4011a8, "CALL", "inspect", "call sym.imp.stat")],
+        0x401090: [Xref(0x4011ba, "CALL", "probe_link", "call sym.imp.lstat")],
+        0x4010a0: [Xref(0x4011cc, "CALL", "stat_at", "call sym.imp.fstatat")],
+        0x4010b0: [Xref(0x4011de, "CALL", "big_stat", "call sym.imp.stat64")],
+        0x4010c0: [Xref(0x4011f0, "CALL", "big_lstat", "call sym.imp.lstat64")],
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe362_clean_session() -> FakeR2Session:
+    """Only fd-based / atomic primitives imported — no CWE-362 check present."""
+    imports = [
+        Import(name="fstat", plt=0x401040),     # fd-based, never a path
+        Import(name="openat", plt=0x401050),    # atomic dirfd-relative open
+        Import(name="open", plt=0x401060),      # a use sink (CWE-22), not a check
+        Import(name="printf", plt=0x401070),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
 # --- CWE-798 hard-coded-credential fixtures --------------------------------
 #
 # Data-driven detector (NOT a PLT-lookup): it scans the binary's extracted

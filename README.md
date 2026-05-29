@@ -43,14 +43,14 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {22,78,89,119,120,134,242,252,295,327,369,426,476,676,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {22,78,89,119,120,134,242,252,295,327,362,369,426,476,676,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
 - `--checks` — which CWE check to run; one of `22`, `78`, `89`, `119`, `120`,
-  `134`, `242`, `252`, `295`, `327`, `369`, `426`, `476`, `676`, `798`, or `all`
-  (default: `all`)
+  `134`, `242`, `252`, `295`, `327`, `362`, `369`, `426`, `476`, `676`, `798`,
+  or `all` (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
 - `--output-file FILE` (`-o FILE`) — write the report to `FILE` instead of
@@ -135,7 +135,7 @@ is, not how severe the bug would be if exploited:
 | Confidence | Meaning | Applies to |
 |---|---|---|
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
-| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
+| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
 | `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
@@ -304,8 +304,8 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-22, CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-369,
-CWE-426, CWE-476, CWE-676, and CWE-798 were added post-v0.1 (see
+in v0.1; CWE-22, CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-362,
+CWE-369, CWE-426, CWE-476, CWE-676, and CWE-798 were added post-v0.1 (see
 [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
@@ -590,6 +590,66 @@ The confidence mirrors the per-symbol severity (HIGH→`high`, MEDIUM→`medium`
 the same policy as CWE-676. Because it is a pure PLT lookup it is
 architecture-agnostic and works on every architecture radare2 can disassemble.
 
+### CWE-362 — Race Condition (filesystem TOCTOU check-then-use)
+
+Calls to the classic *check* primitives that test a filesystem path **by name** —
+the `access` family (`access`, `faccessat`, `euidaccess`, `eaccess`) and the
+`stat` family (`stat`, `lstat`, `fstatat`, `stat64`, `lstat64`). The textbook
+time-of-check-to-time-of-use bug is:
+
+```c
+if (access("/tmp/x", W_OK) == 0)   /* CHECK — by path  */
+    fd = open("/tmp/x", O_WRONLY); /* USE   — same path */
+```
+
+Between the check and the use, an attacker who can influence the namespace (a
+writable parent directory, a predictable temp name) swaps the path for a symlink
+to a file they could not otherwise reach, and the privileged program operates on
+the attacker's target. The *race window* is the weakness, and it is present
+**regardless of the path argument's provenance** — even a perfectly constant
+path is exploitable when the containing directory is attacker-writable.
+
+Like CWE-22, CWE-426, and CWE-676 this is a pure PLT-lookup check — the call to
+a check-by-path primitive is itself the finding. It does **not** try to prove a
+matching use-by-path call follows, because the check and the use are frequently
+in different functions/blocks, and the high-value triage signal — "this binary
+makes access/permission decisions *by path*; confirm every one is converted to
+an fd-based check (`open` then `fstat`) or made atomic (`O_NOFOLLOW`, `openat`
+relative to a trusted dirfd)" — is already carried by the call's presence.
+
+This is the complement of [CWE-22](#cwe-22--path-traversal), which also lists
+`access`/`stat` as MEDIUM sinks but for a *different* reason: there the concern
+is the path *content* (`../` escaping a base directory), here it is the *race
+window* of using a name twice. A single `access` call site can therefore
+legitimately carry **both** findings, surfaced under distinct CWE ids.
+
+The fd-based / atomic forms are deliberately **not** flagged: `fstat` takes an
+open fd and so cannot race on a name, and `openat` is the recommended
+dirfd-relative replacement. All flagged primitives are MEDIUM — a check-by-path
+is a *triage* signal, not a confirmed race; it is benign when the result does
+not gate a later use of the same path.
+
+```bash
+$ blight --binary path/to/elf --checks 362 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [362],
+  "findings": [
+    {
+      "cwe": 362,
+      "function": "guarded_open",
+      "address": "0x401160",
+      "evidence": "[MEDIUM] call to access: access() checks a path's accessibility by name; if the result gates a later open/exec on the same path it is a TOCTOU race — use an fd-based check (open then fstat / faccessat with a trusted dirfd)",
+      "symbol": "access",
+      "confidence": "medium"
+    }
+  ]
+}
+```
+
+Because it is a pure PLT lookup it is architecture-agnostic and works on every
+architecture radare2 can disassemble.
+
 ### CWE-369 — Divide By Zero
 
 An integer division or remainder instruction whose **divisor is not a
@@ -862,8 +922,8 @@ $ blight --binary path/to/elf --checks 798 --format json
 
 `blight` supports **x86_64** and **AArch64 (arm64)** ELF binaries.
 
-The CWE-22, CWE-89, CWE-119, CWE-120, CWE-242, CWE-295, CWE-327, CWE-426, and
-CWE-676 detectors flag any call site to a dangerous symbol and are therefore architecture-agnostic
+The CWE-22, CWE-89, CWE-119, CWE-120, CWE-242, CWE-295, CWE-327, CWE-362,
+CWE-426, and CWE-676 detectors flag any call site to a dangerous symbol and are therefore architecture-agnostic
 — they work on every architecture radare2 can disassemble. CWE-798 is likewise
 architecture-agnostic (it scans string data, not the call graph). The CWE-78 and CWE-134 detectors inspect
 the register that carries a specific argument (the command string, the format
