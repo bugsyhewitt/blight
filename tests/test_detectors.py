@@ -5,6 +5,7 @@ from __future__ import annotations
 from blight.detectors import (
     cwe78,
     cwe89,
+    cwe119,
     cwe120,
     cwe134,
     cwe242,
@@ -24,6 +25,13 @@ from tests.fake_session import (
     calloc_stored_escapes_session,
     chroot_unchecked_fallthrough_session,
     clean_baseline_session,
+    cwe119_all_session,
+    cwe119_clean_session,
+    memcpy_vuln_session,
+    memmove_vuln_session,
+    strcat_vuln_session,
+    strncat_vuln_session,
+    alloca_vuln_session,
     ctime_vuln_session,
     curl_setopt_vuln_session,
     cwe89_all_session,
@@ -97,6 +105,93 @@ class TestCwe120:
         assert strcpy_finding.function == "copy_it"
         assert strcpy_finding.address == hex(0x40114A)
         assert "strcpy" in strcpy_finding.evidence
+
+
+class TestCwe119:
+    def test_flags_memcpy_high(self) -> None:
+        findings = cwe119.detect(memcpy_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 119
+        assert f.symbol == "memcpy"
+        assert f.function == "copy_buf"
+        assert f.address == hex(0x401160)
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "length" in f.evidence
+
+    def test_flags_memmove_high(self) -> None:
+        findings = cwe119.detect(memmove_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 119
+        assert f.symbol == "memmove"
+        assert f.function == "shift_buf"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_strcat_high(self) -> None:
+        findings = cwe119.detect(strcat_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 119
+        assert f.symbol == "strcat"
+        assert f.function == "build_path"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "strlcat" in f.evidence
+
+    def test_flags_strncat_medium(self) -> None:
+        # strncat's count is source-relative, not destination-relative, so it
+        # CAN be used correctly — MEDIUM, not HIGH.
+        findings = cwe119.detect(strncat_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 119
+        assert f.symbol == "strncat"
+        assert f.function == "append_seg"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_alloca_medium(self) -> None:
+        findings = cwe119.detect(alloca_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 119
+        assert f.symbol == "alloca"
+        assert f.function == "scratch"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+        assert "stack" in f.evidence
+
+    def test_flags_all_representative_routines(self) -> None:
+        findings = cwe119.detect(cwe119_all_session())
+        symbols = {f.symbol for f in findings}
+        assert symbols == {"memcpy", "memmove", "strcat", "strncat", "alloca"}
+        for f in findings:
+            assert f.cwe == 119
+            assert f.function
+            assert f.address.startswith("0x")
+            assert f.evidence
+            assert f.confidence in ("high", "medium", "low")
+
+    def test_does_not_flag_safe_bounded_api(self) -> None:
+        # strlcpy is imported but is the safe pattern — must never be flagged.
+        findings = cwe119.detect(cwe119_all_session())
+        assert all(f.symbol != "strlcpy" for f in findings)
+
+    def test_clean_session_no_findings(self) -> None:
+        # Only bounded/safe routines (strlcpy/strlcat/snprintf/memset).
+        assert cwe119.detect(cwe119_clean_session()) == []
+
+    def test_does_not_flag_absent_routine(self) -> None:
+        # clean-baseline has none of the CWE-119 routines.
+        assert cwe119.detect(clean_baseline_session()) == []
+
+    def test_does_not_flag_strcpy_owned_by_cwe120(self) -> None:
+        # strcpy/sprintf/gets belong to CWE-120; CWE-119 must not claim them.
+        findings = cwe119.detect(strcpy_vuln_session())
+        assert findings == []
 
 
 class TestCwe242:

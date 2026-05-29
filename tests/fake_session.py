@@ -598,6 +598,82 @@ def cwe89_clean_session() -> FakeR2Session:
     return FakeR2Session(imports, xrefs={})
 
 
+# --- CWE-119 memory-bounds fixtures ----------------------------------------
+#
+# Pure PLT-lookup detector (same shape as CWE-89 / CWE-327 / CWE-676): the
+# presence of a call to a bounded/unbounded memory-copy or concatenation routine
+# is the finding. No data flow — the call site is where an out-of-bounds write
+# lands when the length is wrong or the destination capacity is exceeded.
+
+def memcpy_vuln_session() -> FakeR2Session:
+    """A single memcpy() call (caller-supplied length, possible OOB write)."""
+    imports = [Import(name="memcpy", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "copy_buf", "call sym.imp.memcpy")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def memmove_vuln_session() -> FakeR2Session:
+    """A single memmove() call (caller-supplied length, possible OOB write)."""
+    imports = [Import(name="memmove", plt=0x401050)]
+    xrefs = {0x401050: [Xref(0x401172, "CALL", "shift_buf", "call sym.imp.memmove")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def strcat_vuln_session() -> FakeR2Session:
+    """A single strcat() call (unbounded concatenation)."""
+    imports = [Import(name="strcat", plt=0x401060)]
+    xrefs = {0x401060: [Xref(0x401184, "CALL", "build_path", "call sym.imp.strcat")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def strncat_vuln_session() -> FakeR2Session:
+    """A single strncat() call (source-relative count — MEDIUM)."""
+    imports = [Import(name="strncat", plt=0x401070)]
+    xrefs = {0x401070: [Xref(0x401196, "CALL", "append_seg", "call sym.imp.strncat")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def alloca_vuln_session() -> FakeR2Session:
+    """A single alloca() call (caller-supplied stack size — MEDIUM)."""
+    imports = [Import(name="alloca", plt=0x401080)]
+    xrefs = {0x401080: [Xref(0x4011a8, "CALL", "scratch", "call sym.imp.alloca")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe119_all_session() -> FakeR2Session:
+    """One call to each of five representative CWE-119 routines.
+
+    Includes a safe neighbour (strlcpy) that must NOT fire.
+    """
+    imports = [
+        Import(name="memcpy", plt=0x401040),
+        Import(name="memmove", plt=0x401050),
+        Import(name="strcat", plt=0x401060),
+        Import(name="strncat", plt=0x401070),
+        Import(name="alloca", plt=0x401080),
+        Import(name="strlcpy", plt=0x4010a0),  # safe API, must not fire
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "copy_buf", "call sym.imp.memcpy")],
+        0x401050: [Xref(0x401172, "CALL", "shift_buf", "call sym.imp.memmove")],
+        0x401060: [Xref(0x401184, "CALL", "build_path", "call sym.imp.strcat")],
+        0x401070: [Xref(0x401196, "CALL", "append_seg", "call sym.imp.strncat")],
+        0x401080: [Xref(0x4011a8, "CALL", "scratch", "call sym.imp.alloca")],
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe119_clean_session() -> FakeR2Session:
+    """Only bounded/safe routines imported — no CWE-119 routine present."""
+    imports = [
+        Import(name="strlcpy", plt=0x401040),
+        Import(name="strlcat", plt=0x401050),
+        Import(name="snprintf", plt=0x401060),
+        Import(name="memset", plt=0x401070),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
 # --- CWE-476 NULL-pointer-dereference fixtures -----------------------------
 #
 # Pattern: an allocator (malloc/calloc/fopen/...) returns a pointer in rax.

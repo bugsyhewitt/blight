@@ -133,8 +133,8 @@ is, not how severe the bug would be if exploited:
 
 | Confidence | Meaning | Applies to |
 |---|---|---|
-| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-89 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-676 (HIGH-severity symbols) |
-| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols) |
+| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-676 (HIGH-severity symbols) |
+| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols) |
 | `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
@@ -303,8 +303,8 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-89, CWE-134, CWE-252, CWE-295, CWE-327, CWE-476, and CWE-676 were
-added post-v0.1 (see [POST_V01.md](POST_V01.md)).
+in v0.1; CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-476, and
+CWE-676 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
 
 ### CWE-78 — OS Command Injection
 
@@ -388,6 +388,45 @@ $ blight --binary tests/fixtures/strcpy-vuln --checks 120 --format json
       "address": "0x401170",
       "evidence": "call to strcpy: strcpy copies without a destination size bound",
       "symbol": "strcpy",
+      "confidence": "high"
+    }
+  ]
+}
+```
+
+### CWE-119 — Improper Restriction of Operations within the Bounds of a Memory Buffer
+
+Calls to the memory-copy / concatenation primitives whose safe use depends
+entirely on the caller having computed a correct size bound — the broader
+memory-bounds class that complements CWE-120's unchecked-copy set. This is a
+pure PLT-lookup check (the same shape as CWE-89, CWE-327, CWE-295 and CWE-676):
+it does **not** read the length argument out of the disassembly — the call site
+is itself the finding, because the high-value signal "this binary performs raw
+bounded/unbounded memory copies, confirm every length is destination-clamped" is
+already carried by the call's presence.
+
+The unbounded copies and concatenations (`memcpy`, `memmove`, `bcopy`,
+`stpcpy`, `wcscpy`, `strcat`, `wcscat`) are `high` confidence. The
+count-bounded-but-routinely-misused routines (`strncat`/`wcsncat`, whose count
+is source-relative rather than destination-relative, and `alloca`, a
+caller-sized stack allocation) are `medium`. The safe bounded forms (`strlcpy`,
+`strlcat`, `snprintf`) are **not** flagged — they are the recommended pattern.
+The severity is surfaced in the evidence string. `strcpy`/`sprintf`/`gets`
+belong to CWE-120, not CWE-119; the two detectors are complementary, not
+redundant.
+
+```bash
+$ blight --binary ./service --checks 119 --format json
+{
+  "binary": "./service",
+  "checks": [119],
+  "findings": [
+    {
+      "cwe": 119,
+      "function": "copy_buf",
+      "address": "0x401160",
+      "evidence": "[HIGH] call to memcpy: memcpy copies a caller-supplied length — confirm the length cannot exceed the destination size; a wrong length is an out-of-bounds write",
+      "symbol": "memcpy",
       "confidence": "high"
     }
   ]
@@ -632,9 +671,9 @@ $ blight --binary path/to/elf --checks 676 --format json
 
 `blight` supports **x86_64** and **AArch64 (arm64)** ELF binaries.
 
-The CWE-120, CWE-242, CWE-295, CWE-327, and CWE-676 detectors flag any call site
-to a dangerous symbol and are therefore architecture-agnostic — they work on every
-architecture radare2 can disassemble. The CWE-78 and CWE-134 detectors inspect
+The CWE-89, CWE-119, CWE-120, CWE-242, CWE-295, CWE-327, and CWE-676 detectors
+flag any call site to a dangerous symbol and are therefore architecture-agnostic
+— they work on every architecture radare2 can disassemble. The CWE-78 and CWE-134 detectors inspect
 the register that carries a specific argument (the command string, the format
 string), and CWE-476 and CWE-252 inspect the *return* register (`rax`/`x0`) plus
 the architecture's guard idioms (NULL-checks for CWE-476, return-value checks for
