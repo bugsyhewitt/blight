@@ -7,7 +7,7 @@ data structures that mirror the real radare2 JSON we observed for the fixtures.
 
 from __future__ import annotations
 
-from blight.r2 import Import, Instruction, Xref
+from blight.r2 import Import, Instruction, Str, Xref
 
 
 class FakeR2Session:
@@ -18,6 +18,7 @@ class FakeR2Session:
         xrefs: dict mapping a PLT address -> list of Xref.
         functions: dict mapping a function-containing address -> list of
             Instruction (the disassembly returned for any address inside it).
+        strings: list of Str literals extracted from the binary (izzj).
     """
 
     def __init__(
@@ -26,17 +27,22 @@ class FakeR2Session:
         xrefs: dict[int, list[Xref]] | None = None,
         functions: dict[int, list[Instruction]] | None = None,
         arch: str = "x86_64",
+        strings: list[Str] | None = None,
     ) -> None:
         self._imports = imports
         self._xrefs = xrefs or {}
         self._functions = functions or {}
         self._arch = arch
+        self._strings = strings or []
 
     def imports(self) -> list[Import]:
         return list(self._imports)
 
     def arch(self) -> str:
         return self._arch
+
+    def strings(self) -> list[Str]:
+        return list(self._strings)
 
     def xrefs_to(self, addr: int) -> list[Xref]:
         return list(self._xrefs.get(addr, []))
@@ -1212,3 +1218,140 @@ def cwe426_clean_session() -> FakeR2Session:
         Import(name="printf", plt=0x401070),
     ]
     return FakeR2Session(imports, xrefs={})
+
+
+# --- CWE-798 hard-coded-credential fixtures --------------------------------
+#
+# Data-driven detector (NOT a PLT-lookup): it scans the binary's extracted
+# string literals (R2Session.strings() / radare2 izzj) for the textual shape of
+# an embedded secret. Each fixture supplies a `strings=[Str(...)]` list.
+
+def _strings_session(strings: list[Str]) -> FakeR2Session:
+    """A session carrying only string literals (no imports/xrefs)."""
+    return FakeR2Session(imports=[], strings=strings)
+
+
+def password_assignment_vuln_session() -> FakeR2Session:
+    """A `password=...` assignment with a concrete value (HIGH)."""
+    return _strings_session(
+        [Str(vaddr=0x402010, string="password=SuperSecret123", section=".rodata")]
+    )
+
+
+def passwd_colon_assignment_vuln_session() -> FakeR2Session:
+    """A `passwd: ...` colon-style assignment with a concrete value (HIGH)."""
+    return _strings_session(
+        [Str(vaddr=0x402020, string="db_passwd: hunter2value", section=".rodata")]
+    )
+
+
+def api_key_secret_shaped_vuln_session() -> FakeR2Session:
+    """An `api_key=` with a long, secret-shaped value (token-class → HIGH)."""
+    return _strings_session(
+        [
+            Str(
+                vaddr=0x402030,
+                string="api_key=AKIAIOSFODNN7EXAMPLE0KEY",
+                section=".rodata",
+            )
+        ]
+    )
+
+
+def token_short_value_session() -> FakeR2Session:
+    """A `token=` with a short, non-secret-shaped value (token-class → MEDIUM)."""
+    return _strings_session(
+        [Str(vaddr=0x402040, string="token=abc123", section=".rodata")]
+    )
+
+
+def private_key_blob_vuln_session() -> FakeR2Session:
+    """An embedded PEM private-key header (HIGH)."""
+    return _strings_session(
+        [
+            Str(
+                vaddr=0x403000,
+                string=(
+                    "-----BEGIN RSA PRIVATE KEY-----\n"
+                    "MIIEpAIBAAKCAQEA...redacted...\n"
+                    "-----END RSA PRIVATE KEY-----"
+                ),
+                section=".rodata",
+            )
+        ]
+    )
+
+
+def openssh_key_blob_vuln_session() -> FakeR2Session:
+    """An embedded OpenSSH private-key banner (HIGH)."""
+    return _strings_session(
+        [
+            Str(
+                vaddr=0x403100,
+                string="-----BEGIN OPENSSH PRIVATE KEY-----",
+                section=".data",
+            )
+        ]
+    )
+
+
+def uri_credential_vuln_session() -> FakeR2Session:
+    """A connection URI carrying an inline user:password@host (HIGH)."""
+    return _strings_session(
+        [
+            Str(
+                vaddr=0x402050,
+                string="mysql://root:hunter2pass@db.internal:3306/app",
+                section=".rodata",
+            )
+        ]
+    )
+
+
+def cwe798_placeholder_clean_session() -> FakeR2Session:
+    """Placeholders / templates / empty values — must NOT fire."""
+    return _strings_session(
+        [
+            Str(vaddr=0x402060, string="password=%s", section=".rodata"),
+            Str(vaddr=0x402068, string="password=", section=".rodata"),
+            Str(vaddr=0x402070, string="api_key=${API_KEY}", section=".rodata"),
+            Str(vaddr=0x402078, string="secret=changeme", section=".rodata"),
+            Str(vaddr=0x402080, string="token={0}", section=".rodata"),
+            Str(vaddr=0x402088, string="password=YOUR_PASSWORD_HERE", section=".rodata"),
+            Str(vaddr=0x402090, string="http://user:%s@host/path", section=".rodata"),
+            Str(vaddr=0x402098, string="username=admin", section=".rodata"),  # not a secret key
+        ]
+    )
+
+
+def cwe798_no_strings_session() -> FakeR2Session:
+    """A binary with no string literals at all — nothing to flag."""
+    return _strings_session([])
+
+
+def cwe798_all_session() -> FakeR2Session:
+    """A mix of every CWE-798 signal in one binary, plus benign neighbours."""
+    return _strings_session(
+        [
+            Str(vaddr=0x402010, string="password=SuperSecret123", section=".rodata"),
+            Str(
+                vaddr=0x402030,
+                string="api_key=AKIAIOSFODNN7EXAMPLE0KEY",
+                section=".rodata",
+            ),
+            Str(
+                vaddr=0x403000,
+                string="-----BEGIN EC PRIVATE KEY-----",
+                section=".rodata",
+            ),
+            Str(
+                vaddr=0x402050,
+                string="postgres://admin:s3cr3tDBpass@10.0.0.5/prod",
+                section=".rodata",
+            ),
+            # benign neighbours — must not fire
+            Str(vaddr=0x402100, string="Usage: %s [options]", section=".rodata"),
+            Str(vaddr=0x402108, string="password=%s\n", section=".rodata"),
+            Str(vaddr=0x402110, string="username=guest", section=".rodata"),
+        ]
+    )

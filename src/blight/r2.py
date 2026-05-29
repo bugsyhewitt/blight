@@ -45,6 +45,20 @@ class Instruction:
     disasm: str
 
 
+@dataclass(frozen=True)
+class Str:
+    """A literal string extracted from the binary, from radare2's ``izzj``.
+
+    ``izzj`` lists every printable string in the file's sections (not just the
+    declared .rodata literals ``izj`` reports), which is what a credential hunt
+    wants — hard-coded secrets are frequently squirrelled away in odd sections.
+    """
+
+    vaddr: int
+    string: str
+    section: str
+
+
 class R2Session(Protocol):
     """Interface detectors depend on. Implemented by :class:`Radare2Session`
     for real analysis and by a fake in the unit tests."""
@@ -56,6 +70,8 @@ class R2Session(Protocol):
     def function_instructions(self, func_addr: int) -> list[Instruction]: ...
 
     def arch(self) -> str: ...
+
+    def strings(self) -> list[Str]: ...
 
 
 class Radare2Session:
@@ -122,6 +138,39 @@ class Radare2Session:
                 Instruction(
                     addr=o.get("addr", 0),
                     disasm=o.get("disasm") or o.get("opcode", ""),
+                )
+            )
+        return out
+
+    def strings(self) -> list[Str]:
+        """Return every printable string in the binary, via ``izzj``.
+
+        ``izzj`` scans the whole file (all sections), not just the strings
+        radare2 has attributed to data symbols, so embedded credentials that
+        live outside .rodata are still surfaced. The base64-or-raw ``string``
+        field is decoded by radare2 already; we take it verbatim.
+        """
+        import base64  # noqa: PLC0415
+
+        data = self._cmdj("izzj")
+        # izzj shape: a list of {"vaddr", "string", "section", ...} objects, or
+        # (older r2) {"strings": [...]}.
+        entries = data.get("strings", []) if isinstance(data, dict) else data
+        out: list[Str] = []
+        for s in entries:
+            raw = s.get("string", "")
+            # Some r2 builds base64-encode the string under a "type":"base64"
+            # marker; decode defensively, falling back to the raw text.
+            if s.get("type") == "base64" and raw:
+                try:
+                    raw = base64.b64decode(raw).decode("utf-8", "replace")
+                except Exception:  # pragma: no cover - defensive
+                    pass
+            out.append(
+                Str(
+                    vaddr=s.get("vaddr", 0),
+                    string=raw,
+                    section=s.get("section", ""),
                 )
             )
         return out

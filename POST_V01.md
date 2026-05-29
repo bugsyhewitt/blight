@@ -210,6 +210,51 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **CWE-798 — Use of Hard-coded Credentials** (post-backlog; the first
+  *data-driven* detector — it scans string literals, not the call graph).
+  `src/blight/detectors/cwe798.py` flags hard-coded secrets embedded in the
+  binary by scanning the extracted string table (a new `R2Session.strings()`
+  primitive backed by radare2's `izzj`, which lists every printable string in
+  the file's sections, added to `r2.py` and the fake session). This is the
+  first blight detector that does **not** key off the PLT / xref graph: a baked
+  secret leaves no call-site fingerprint, it is *data*, so the right primitive
+  is a string scan. Three independent signals fire: (1) embedded private-key /
+  cert material (a PEM `-----BEGIN … PRIVATE KEY-----` header, an OpenSSH
+  private-key banner, or a PuTTY key header — HIGH, the blob itself is the
+  secret); (2) credential-bearing connection URIs (`scheme://user:password@host`
+  with a concrete, non-placeholder password — HIGH); and (3) assignment-style
+  secrets (`key=value` / `key: value` / `export KEY=value` where the key names a
+  secret — `password`/`passwd`/`secret`/`api_key`/`token`/`private_key`/… — and
+  the value is concrete), where password-class keys are HIGH and token/key-class
+  keys are HIGH when the value is long/secret-shaped and MEDIUM otherwise. False
+  positives are controlled by rejecting format templates and placeholders
+  (`%s`, `{0}`, `${VAR}`, `$VAR`, empty values, and sentinels like `changeme` /
+  `example` / `your_password_here`) and by only matching secret-class key names
+  (so `username=admin` does not fire). Crucially the detector **never echoes the
+  secret value** — evidence strings carry only a redacted preview (first char +
+  length), so the report itself cannot leak the credential (asserted in the
+  tests). Architecture-agnostic (strings are the same on every target radare2
+  can parse). Registered as check `798`, so the `--checks {…,798,all}` token and
+  the `all` set wire in automatically through the `DETECTORS` dispatch dict;
+  SARIF maps CWE-798 to level `error`. A new committed fixture `creds-vuln`
+  (`tests/fixtures/creds-vuln.c` + blob, wired into the `Makefile` and
+  `REGENERATE.md`) embeds a hard-coded password, an api_key, and a credential
+  URI in `.rodata` for the integration test. Chosen as the next improvement
+  because the entire ranked backlog (items 1-8) plus every CLI/output-layer item
+  and the CWE-22/78/89/119/120/134/242/252/295/327/426/476/676 detector families
+  had already shipped — hard-coded credentials are a perennial MITRE Top-25
+  weakness and are endemic in the firmware / embedded ELF binaries blight
+  targets, and the *string-scanning* detection mechanism it introduces is a
+  genuinely new capability blight lacked (every prior detector was PLT/xref or
+  disassembly based), opening the door to a whole class of data-driven checks.
+  The remaining high-yield classes (CWE-190 integer overflow, CWE-416
+  use-after-free) still require symbolic execution / heap modeling that is out
+  of scope for blight's static approach. 13 new unit tests
+  (`tests/test_detectors.py::TestCwe798`) plus 2 integration tests
+  (`test_cwe798_on_creds_vuln`, `test_strings_surfaces_rodata_literals`); the
+  `--checks all`, scan-fixture, and SARIF-mapping assertions were updated to
+  include `798`. Test count 306 → 318 (unit) + 2 integration.
+
 - **CWE-22 — Improper Limitation of a Pathname to a Restricted Directory
   ("Path Traversal")** (post-backlog; new static-analysis detector).
   `src/blight/detectors/cwe22.py` flags call sites to filesystem routines that

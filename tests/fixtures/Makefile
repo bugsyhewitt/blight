@@ -13,7 +13,7 @@
 CC      ?= gcc
 CFLAGS  := -O0 -g -no-pie -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -w
 
-BINARIES := strcpy-vuln system-vuln gets-vuln clean-baseline
+BINARIES := strcpy-vuln system-vuln gets-vuln clean-baseline creds-vuln
 
 .PHONY: all clean
 
@@ -29,6 +29,9 @@ gets-vuln: gets-vuln.c
 	$(CC) $(CFLAGS) -o $@ $<
 
 clean-baseline: clean-baseline.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+creds-vuln: creds-vuln.c
 	$(CC) $(CFLAGS) -o $@ $<
 
 clean:

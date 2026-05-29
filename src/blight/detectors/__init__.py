@@ -29,6 +29,7 @@ from . import (
     cwe426,
     cwe476,
     cwe676,
+    cwe798,
 )
 
 Detector = Callable[[R2Session], list[Finding]]
@@ -48,6 +49,7 @@ DETECTORS: dict[int, Detector] = {
     426: cwe426.detect,
     476: cwe476.detect,
     676: cwe676.detect,
+    798: cwe798.detect,
 }
 
 __all__ = ["DETECTORS", "Detector"]

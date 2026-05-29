@@ -43,13 +43,14 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {78,89,120,134,242,252,295,327,476,676,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {22,78,89,119,120,134,242,252,295,327,426,476,676,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
-- `--checks` — which CWE check to run; one of `78`, `89`, `120`, `134`, `242`,
-  `252`, `295`, `327`, `476`, `676`, or `all` (default: `all`)
+- `--checks` — which CWE check to run; one of `22`, `78`, `89`, `119`, `120`,
+  `134`, `242`, `252`, `295`, `327`, `426`, `476`, `676`, `798`, or `all`
+  (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
 - `--output-file FILE` (`-o FILE`) — write the report to `FILE` instead of
@@ -133,8 +134,8 @@ is, not how severe the bug would be if exploited:
 
 | Confidence | Meaning | Applies to |
 |---|---|---|
-| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols) |
-| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols) |
+| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-426, CWE-676 (HIGH-severity symbols), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
+| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
 | `low` | The pattern is weakly indicative. | CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
@@ -304,7 +305,8 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
 in v0.1; CWE-22, CWE-89, CWE-119, CWE-134, CWE-252, CWE-295, CWE-327, CWE-426,
-CWE-476, and CWE-676 were added post-v0.1 (see [POST_V01.md](POST_V01.md)).
+CWE-476, CWE-676, and CWE-798 were added post-v0.1 (see
+[POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
 
@@ -753,13 +755,60 @@ $ blight --binary path/to/elf --checks 676 --format json
 }
 ```
 
+### CWE-798 — Use of Hard-coded Credentials
+
+A secret baked into the binary — a default admin password, an API key, an
+embedded private key, or a connection string with an inline `user:password@host`
+— is one of the most common and most damaging findings in a real firmware /
+embedded audit. Unlike every other detector, CWE-798 is **data-driven, not
+PLT-driven**: a hard-coded secret leaves no call-site fingerprint, so this check
+scans the binary's extracted string literals (radare2 `izzj`, surfaced via
+`R2Session.strings()`) for the textual shape of a credential. It is the first
+blight detector that reads string *data* rather than the call graph.
+
+Three independent signals fire:
+
+| Signal | Severity | What it matches |
+|---|---|---|
+| Embedded key material | HIGH | A PEM `-----BEGIN … PRIVATE KEY-----` armour header, an OpenSSH private-key banner, or a PuTTY key header |
+| Credential URI | HIGH | A `scheme://user:password@host` authority with a concrete (non-placeholder) password |
+| Assignment-style secret | HIGH / MEDIUM | `key=value` / `key: value` / `export KEY=value` where the key names a secret (`password`, `passwd`, `secret`, `api_key`, `token`, `private_key`, …) and the value is concrete; password-class keys are HIGH, token/key-class are HIGH when the value is long/secret-shaped and MEDIUM otherwise |
+
+False positives are controlled by rejecting **format templates and
+placeholders**: `%s` conversions, `{0}` / `${VAR}` / `$VAR` templates, empty
+values, and sentinels (`changeme`, `example`, `your_password_here`, …) never
+fire, and only secret-class key names are considered (so `username=admin` is not
+flagged). The detector **never echoes the secret value** — evidence strings carry
+only a redacted preview (first character + length), so the report itself does not
+leak the credential. Like the PLT-lookup detectors it is architecture-agnostic;
+strings are the same on every target radare2 can parse.
+
+```bash
+$ blight --binary path/to/elf --checks 798 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [798],
+  "findings": [
+    {
+      "cwe": 798,
+      "function": ".rodata",
+      "address": "0x402010",
+      "evidence": "[HIGH] hard-coded credential: password=S************** (len=15)",
+      "symbol": "password",
+      "confidence": "high"
+    }
+  ]
+}
+```
+
 ## Architecture support
 
 `blight` supports **x86_64** and **AArch64 (arm64)** ELF binaries.
 
 The CWE-22, CWE-89, CWE-119, CWE-120, CWE-242, CWE-295, CWE-327, CWE-426, and
 CWE-676 detectors flag any call site to a dangerous symbol and are therefore architecture-agnostic
-— they work on every architecture radare2 can disassemble. The CWE-78 and CWE-134 detectors inspect
+— they work on every architecture radare2 can disassemble. CWE-798 is likewise
+architecture-agnostic (it scans string data, not the call graph). The CWE-78 and CWE-134 detectors inspect
 the register that carries a specific argument (the command string, the format
 string), and CWE-476 and CWE-252 inspect the *return* register (`rax`/`x0`) plus
 the architecture's guard idioms (NULL-checks for CWE-476, return-value checks for
