@@ -57,6 +57,10 @@ class FakeR2Session:
                 return list(ops)
         return []
 
+    def function_addrs(self) -> list[int]:
+        # Mirror radare2's aflj: the entry address of every known function.
+        return list(self._functions.keys())
+
 
 # --- Convenience builders mirroring the shipped fixtures -------------------
 
@@ -1025,6 +1029,151 @@ def arm64_setuid_checked_session() -> FakeR2Session:
         Instruction(0x844, "ldp x29, x30, [sp], 0x10"),
     ]
     return FakeR2Session(imports, xrefs, {0x830: drop_ops}, arch="arm64")
+
+
+# --- CWE-369 divide-by-zero fixtures ---------------------------------------
+#
+# Instruction-pattern detector (NOT a PLT-lookup): it walks every function body
+# (function_addrs + function_instructions) looking for a div/idiv (x86_64) or
+# sdiv/udiv (AArch64) whose divisor is a register or memory operand with no
+# preceding zero-check. These fixtures carry only `functions=` disassembly.
+
+
+def idiv_register_vuln_session() -> FakeR2Session:
+    """x86_64: `idiv ecx` with no zero-check on ecx (vulnerable)."""
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov eax, dword [rbp - 0x4]"),  # dividend
+        Instruction(0x401144, "cdq"),
+        Instruction(0x401146, "idiv ecx"),                    # divisor ecx, unchecked
+        Instruction(0x401148, "leave"),
+        Instruction(0x401149, "ret"),
+    ]
+    return FakeR2Session(imports=[], functions={0x401136: ops})
+
+
+def div_memory_vuln_session() -> FakeR2Session:
+    """x86_64: `div dword [rbp - 0xc]` — memory divisor (vulnerable)."""
+    ops = [
+        Instruction(0x401200, "push rbp"),
+        Instruction(0x401208, "mov eax, dword [rbp - 0x8]"),
+        Instruction(0x40120c, "xor edx, edx"),
+        Instruction(0x40120e, "div dword [rbp - 0xc]"),       # memory divisor
+        Instruction(0x401211, "leave"),
+        Instruction(0x401212, "ret"),
+    ]
+    return FakeR2Session(imports=[], functions={0x401200: ops})
+
+
+def idiv_checked_session() -> FakeR2Session:
+    """x86_64: divisor `ecx` zero-checked before the idiv (safe — must NOT fire)."""
+    ops = [
+        Instruction(0x401300, "push rbp"),
+        Instruction(0x401308, "mov ecx, dword [rbp - 0x4]"),  # load divisor
+        Instruction(0x40130c, "test ecx, ecx"),               # zero-check
+        Instruction(0x40130e, "je 0x401320"),
+        Instruction(0x401314, "mov eax, dword [rbp - 0x8]"),
+        Instruction(0x401318, "cdq"),
+        Instruction(0x40131a, "idiv ecx"),                    # guarded divisor
+        Instruction(0x40131e, "leave"),
+        Instruction(0x40131f, "ret"),
+    ]
+    return FakeR2Session(imports=[], functions={0x401300: ops})
+
+
+def idiv_cmp_checked_session() -> FakeR2Session:
+    """x86_64: divisor `esi` checked via `cmp esi, 0` before idiv (safe)."""
+    ops = [
+        Instruction(0x401400, "push rbp"),
+        Instruction(0x401408, "cmp esi, 0"),                  # zero-check
+        Instruction(0x40140b, "je 0x401420"),
+        Instruction(0x401411, "mov eax, edi"),
+        Instruction(0x401413, "cdq"),
+        Instruction(0x401415, "idiv esi"),                    # guarded
+        Instruction(0x401419, "leave"),
+        Instruction(0x40141a, "ret"),
+    ]
+    return FakeR2Session(imports=[], functions={0x401400: ops})
+
+
+def idiv_constant_divisor_session() -> FakeR2Session:
+    """x86_64: divisor set from a nonzero immediate before idiv (safe)."""
+    ops = [
+        Instruction(0x401500, "push rbp"),
+        Instruction(0x401508, "mov ecx, 0xa"),                # constant divisor 10
+        Instruction(0x40150d, "mov eax, edi"),
+        Instruction(0x40150f, "cdq"),
+        Instruction(0x401511, "idiv ecx"),                    # divisor proven nonzero
+        Instruction(0x401515, "leave"),
+        Instruction(0x401516, "ret"),
+    ]
+    return FakeR2Session(imports=[], functions={0x401500: ops})
+
+
+def no_division_session() -> FakeR2Session:
+    """x86_64: a function with arithmetic but no division (must NOT fire)."""
+    ops = [
+        Instruction(0x401600, "push rbp"),
+        Instruction(0x401608, "mov eax, edi"),
+        Instruction(0x40160a, "imul eax, esi"),               # multiply, not divide
+        Instruction(0x40160d, "add eax, 1"),
+        Instruction(0x401610, "leave"),
+        Instruction(0x401611, "ret"),
+    ]
+    return FakeR2Session(imports=[], functions={0x401600: ops})
+
+
+def arm64_sdiv_register_vuln_session() -> FakeR2Session:
+    """AArch64: `sdiv x0, x1, x2` with no zero-check on x2 (vulnerable)."""
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x10]!"),
+        Instruction(0x838, "ldr w1, [x29, 0x8]"),             # dividend
+        Instruction(0x83c, "ldr w2, [x29, 0xc]"),             # divisor (unchecked)
+        Instruction(0x840, "sdiv w0, w1, w2"),                # divisor w2/x2
+        Instruction(0x844, "ldp x29, x30, [sp], 0x10"),
+        Instruction(0x848, "ret"),
+    ]
+    return FakeR2Session(imports=[], functions={0x830: ops}, arch="arm64")
+
+
+def arm64_udiv_checked_session() -> FakeR2Session:
+    """AArch64: divisor w2 guarded with `cbz` before udiv (safe)."""
+    ops = [
+        Instruction(0x900, "stp x29, x30, [sp, -0x10]!"),
+        Instruction(0x908, "ldr w2, [x29, 0xc]"),             # load divisor
+        Instruction(0x90c, "cbz w2, 0x930"),                  # zero-check
+        Instruction(0x910, "ldr w1, [x29, 0x8]"),
+        Instruction(0x914, "udiv w0, w1, w2"),                # guarded
+        Instruction(0x918, "ldp x29, x30, [sp], 0x10"),
+        Instruction(0x91c, "ret"),
+    ]
+    return FakeR2Session(imports=[], functions={0x900: ops}, arch="arm64")
+
+
+def cwe369_multi_function_session() -> FakeR2Session:
+    """Two functions: one unguarded idiv (flag), one guarded idiv (skip)."""
+    vuln_ops = [
+        Instruction(0x401136, "mov eax, edi"),
+        Instruction(0x401138, "cdq"),
+        Instruction(0x40113a, "idiv esi"),                    # unguarded → flag
+        Instruction(0x40113e, "ret"),
+    ]
+    safe_ops = [
+        Instruction(0x401200, "test ecx, ecx"),               # guard
+        Instruction(0x401202, "je 0x401210"),
+        Instruction(0x401208, "mov eax, edi"),
+        Instruction(0x40120a, "cdq"),
+        Instruction(0x40120c, "idiv ecx"),                    # guarded → skip
+        Instruction(0x401210, "ret"),
+    ]
+    return FakeR2Session(
+        imports=[], functions={0x401136: vuln_ops, 0x401200: safe_ops}
+    )
+
+
+def cwe369_clean_session() -> FakeR2Session:
+    """No functions / no division anywhere — nothing to flag."""
+    return FakeR2Session(imports=[], functions={})
 
 
 # --- AArch64 (arm64) fixtures (POST_V01 item 5) ----------------------------

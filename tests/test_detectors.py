@@ -13,6 +13,7 @@ from blight.detectors import (
     cwe252,
     cwe295,
     cwe327,
+    cwe369,
     cwe426,
     cwe476,
     cwe676,
@@ -63,6 +64,16 @@ from tests.fake_session import (
     cwe295_clean_session,
     cwe327_all_session,
     cwe327_clean_session,
+    idiv_register_vuln_session,
+    div_memory_vuln_session,
+    idiv_checked_session,
+    idiv_cmp_checked_session,
+    idiv_constant_divisor_session,
+    no_division_session,
+    arm64_sdiv_register_vuln_session,
+    arm64_udiv_checked_session,
+    cwe369_multi_function_session,
+    cwe369_clean_session,
     cwe426_all_session,
     cwe426_clean_session,
     dlopen_vuln_session,
@@ -1076,3 +1087,64 @@ class TestCwe798:
     def test_clean_baseline_no_findings(self) -> None:
         # clean-baseline session carries no strings → nothing to flag.
         assert cwe798.detect(clean_baseline_session()) == []
+
+
+class TestCwe369:
+    """CWE-369 Divide By Zero — instruction-pattern detector over every body."""
+
+    def test_flags_idiv_register_divisor(self) -> None:
+        findings = cwe369.detect(idiv_register_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 369
+        assert f.symbol == "idiv"
+        assert f.confidence == "low"
+        assert f.address == hex(0x401146)
+        assert "ecx" in f.evidence
+
+    def test_flags_div_memory_divisor(self) -> None:
+        findings = cwe369.detect(div_memory_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 369
+        assert f.symbol == "div"
+        assert f.address == hex(0x40120E)
+
+    def test_test_guard_suppresses(self) -> None:
+        # `test ecx, ecx` before the idiv proves the divisor was zero-checked.
+        assert cwe369.detect(idiv_checked_session()) == []
+
+    def test_cmp_zero_guard_suppresses(self) -> None:
+        # `cmp esi, 0` before the idiv is also a valid zero-check.
+        assert cwe369.detect(idiv_cmp_checked_session()) == []
+
+    def test_constant_divisor_not_flagged(self) -> None:
+        # divisor set from a nonzero immediate cannot be zero → safe.
+        assert cwe369.detect(idiv_constant_divisor_session()) == []
+
+    def test_no_division_no_findings(self) -> None:
+        # a body with imul/add but no div/idiv must not fire.
+        assert cwe369.detect(no_division_session()) == []
+
+    def test_flags_arm64_sdiv_register_divisor(self) -> None:
+        findings = cwe369.detect(arm64_sdiv_register_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 369
+        assert f.symbol == "sdiv"
+        assert f.address == hex(0x840)
+        # The AArch64 divisor is the THIRD operand (w2), not the dividend.
+        assert "w2" in f.evidence
+
+    def test_arm64_cbz_guard_suppresses(self) -> None:
+        # `cbz w2, ...` before the udiv proves the divisor was zero-checked.
+        assert cwe369.detect(arm64_udiv_checked_session()) == []
+
+    def test_scans_every_function_body(self) -> None:
+        # Two functions: the unguarded idiv fires, the guarded one does not.
+        findings = cwe369.detect(cwe369_multi_function_session())
+        assert len(findings) == 1
+        assert findings[0].address == hex(0x40113A)
+
+    def test_clean_session_no_findings(self) -> None:
+        assert cwe369.detect(cwe369_clean_session()) == []
