@@ -70,6 +70,19 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--output-file",
+        "-o",
+        metavar="FILE",
+        default=None,
+        help=(
+            "write the report to FILE instead of stdout. The file is created "
+            "(or truncated) and the rendered report — in whichever --format is "
+            "selected — is written to it; nothing is printed to stdout. The "
+            "--fail-on exit code is unaffected. Use '-' to force stdout "
+            "explicitly (the default)."
+        ),
+    )
+    parser.add_argument(
         "--workers",
         type=int,
         default=1,
@@ -161,7 +174,8 @@ def main(argv: list[str] | None = None) -> int:
         results = [
             _apply_min_confidence(r, args.min_confidence) for r in results
         ]
-        _emit_directory(target, checks, results, args.format)
+        report = _render_directory(target, checks, results, args.format)
+        _write_report(report, args.output_file, parser)
         emitted = [f for r in results for f in r.findings]
         return _gate_exit_code(emitted, args.fail_on)
 
@@ -173,7 +187,8 @@ def main(argv: list[str] | None = None) -> int:
     [result] = scan_targets([str(target)], checks, workers=1)
     result = _apply_suppressions(result, suppressions)
     result = _apply_min_confidence(result, args.min_confidence)
-    _emit_single(str(target), checks, result, args.format)
+    report = _render_single(str(target), checks, result, args.format)
+    _write_report(report, args.output_file, parser)
     return _gate_exit_code(result.findings, args.fail_on)
 
 
@@ -223,48 +238,64 @@ def _apply_min_confidence(result: ScanResult, minimum: str) -> ScanResult:
     )
 
 
-def _emit_single(
+def _render_single(
     binary: str, checks: list[int], result: ScanResult, fmt: str
-) -> None:
+) -> str:
+    """Render a single-file scan to its report string (no trailing newline)."""
     if fmt == "sarif":
-        sys.stdout.write(
-            dump_sarif(binary, result.findings, version=blight.__version__)
-        )
-        sys.stdout.write("\n")
-    elif fmt == "text":
-        sys.stdout.write(dump_text_single(binary, checks, result.findings))
-        sys.stdout.write("\n")
-    else:
-        output = {
-            "binary": binary,
-            "checks": checks,
-            "findings": [f.to_dict() for f in result.findings],
-        }
-        json.dump(output, sys.stdout, indent=2)
-        sys.stdout.write("\n")
+        return dump_sarif(binary, result.findings, version=blight.__version__)
+    if fmt == "text":
+        return dump_text_single(binary, checks, result.findings)
+    output = {
+        "binary": binary,
+        "checks": checks,
+        "findings": [f.to_dict() for f in result.findings],
+    }
+    return json.dumps(output, indent=2)
 
 
-def _emit_directory(
+def _render_directory(
     directory: Path, checks: list[int], results: list[ScanResult], fmt: str
-) -> None:
+) -> str:
+    """Render a directory scan to its report string (no trailing newline)."""
     if fmt == "sarif":
         # One SARIF run per binary keeps each result's artifactLocation correct.
         all_findings = [f for r in results for f in r.findings]
-        sys.stdout.write(
-            dump_sarif(str(directory), all_findings, version=blight.__version__)
+        return dump_sarif(
+            str(directory), all_findings, version=blight.__version__
         )
+    if fmt == "text":
+        return dump_text_directory(str(directory), checks, results)
+    output = {
+        "directory": str(directory),
+        "checks": checks,
+        "results": [r.to_dict() for r in results],
+    }
+    return json.dumps(output, indent=2)
+
+
+def _write_report(
+    report: str, output_file: str | None, parser: argparse.ArgumentParser
+) -> None:
+    """Write the rendered ``report`` to ``output_file`` or stdout.
+
+    The report is emitted with a single trailing newline, matching the
+    historical stdout behaviour exactly. ``output_file`` of ``None`` or ``"-"``
+    means stdout (the default and the explicit stdout token); any other value
+    is a filesystem path that is created or truncated. An OS error writing the
+    file is surfaced as an ``argparse`` error so the run aborts cleanly with the
+    usage exit code rather than an unhandled traceback.
+    """
+    if output_file is None or output_file == "-":
+        sys.stdout.write(report)
         sys.stdout.write("\n")
-    elif fmt == "text":
-        sys.stdout.write(dump_text_directory(str(directory), checks, results))
-        sys.stdout.write("\n")
-    else:
-        output = {
-            "directory": str(directory),
-            "checks": checks,
-            "results": [r.to_dict() for r in results],
-        }
-        json.dump(output, sys.stdout, indent=2)
-        sys.stdout.write("\n")
+        return
+    try:
+        with open(output_file, "w", encoding="utf-8") as fh:
+            fh.write(report)
+            fh.write("\n")
+    except OSError as exc:
+        parser.error(f"--output-file: cannot write {output_file!r}: {exc}")
 
 
 if __name__ == "__main__":  # pragma: no cover

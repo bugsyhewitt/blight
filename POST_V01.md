@@ -208,6 +208,32 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **`--output-file` / `-o` Report Destination** (post-backlog; CLI ergonomics
+  gap fill). Adds an `--output-file FILE` (short `-o FILE`) flag that writes the
+  rendered report to a file instead of stdout; when set, nothing is printed to
+  stdout. The change refactored the CLI emit path so each scan is *rendered* to
+  a report string (`_render_single` / `_render_directory`) and then *written* by
+  a single `_write_report` helper, so the new destination logic lives in exactly
+  one place and is format-agnostic — it works for `--format json`, `--format
+  sarif`, and `--format text` identically, with the same single trailing newline
+  as the historical stdout output (verified byte-for-byte in
+  `tests/test_cli.py`). `-o -` forces stdout explicitly (the default when the
+  flag is omitted), preserving full backward compatibility. The `--fail-on` gate
+  is evaluated over the same emitted findings regardless of destination, so the
+  CI exit code is unchanged whether the report goes to a file or stdout. An
+  unwritable path (e.g. a missing parent directory) is surfaced as an `argparse`
+  usage error that aborts before any partial output. Chosen as the next
+  improvement because all eight ranked backlog items plus the `--min-confidence`
+  filter, the `--fail-on` gate, and `--format text` had shipped, and routing the
+  report to a file is the natural companion to the CI-gate story (a pipeline
+  that fails the build on findings typically also wants to archive the report as
+  an artifact) while remaining a pure output-layer change with no new detector
+  heuristics or blocked external tooling. The remaining high-yield CWE classes
+  (CWE-190 integer overflow, CWE-416 use-after-free) still require symbolic
+  execution / heap modeling that is out of scope for blight's static
+  PLT-and-disassembly approach. See the `--output-file` tests in
+  `tests/test_cli.py`.
+
 - **`--format text` Human-Readable Console Output** (post-backlog;
   CLI/output-layer direction). `src/blight/formatters/text.py` adds a third
   `--format` choice alongside `json` and `sarif` that renders the findings as a
