@@ -13,6 +13,7 @@ from blight.detectors import (
     cwe252,
     cwe295,
     cwe327,
+    cwe426,
     cwe476,
     cwe676,
 )
@@ -51,6 +52,14 @@ from tests.fake_session import (
     cwe295_clean_session,
     cwe327_all_session,
     cwe327_clean_session,
+    cwe426_all_session,
+    cwe426_clean_session,
+    dlopen_vuln_session,
+    dlmopen_vuln_session,
+    execvp_searchpath_vuln_session,
+    execlp_searchpath_vuln_session,
+    popen_searchpath_vuln_session,
+    system_searchpath_vuln_session,
     cwe476_no_allocators_session,
     gnutls_verify_peers2_vuln_session,
     mbedtls_authmode_vuln_session,
@@ -858,3 +867,101 @@ class TestCwe78:
 
     def test_clean_baseline_no_findings(self) -> None:
         assert cwe78.detect(clean_baseline_session()) == []
+
+
+class TestCwe426:
+    def test_flags_dlopen(self) -> None:
+        findings = cwe426.detect(dlopen_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 426
+        assert f.symbol == "dlopen"
+        assert f.function == "load_plugin"
+        assert f.address == hex(0x401160)
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "LD_LIBRARY_PATH" in f.evidence
+
+    def test_flags_dlmopen(self) -> None:
+        findings = cwe426.detect(dlmopen_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 426
+        assert f.symbol == "dlmopen"
+        assert f.function == "load_ns"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_execvp(self) -> None:
+        findings = cwe426.detect(execvp_searchpath_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 426
+        assert f.symbol == "execvp"
+        assert f.function == "spawn_tool"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "$PATH" in f.evidence
+
+    def test_flags_execlp(self) -> None:
+        findings = cwe426.detect(execlp_searchpath_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 426
+        assert f.symbol == "execlp"
+        assert f.function == "run_helper"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_popen(self) -> None:
+        findings = cwe426.detect(popen_searchpath_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 426
+        assert f.symbol == "popen"
+        assert f.function == "read_proc"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "/bin/sh" in f.evidence
+
+    def test_flags_system(self) -> None:
+        # system() is also inspected by CWE-78, but CWE-426 flags it for the
+        # $PATH-resolution mechanism regardless of argument constness.
+        findings = cwe426.detect(system_searchpath_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 426
+        assert f.symbol == "system"
+        assert f.function == "run_cmd"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_all_representative_routines(self) -> None:
+        findings = cwe426.detect(cwe426_all_session())
+        symbols = {f.symbol for f in findings}
+        assert symbols == {
+            "dlopen",
+            "dlmopen",
+            "execlp",
+            "execvp",
+            "execvpe",
+            "popen",
+            "system",
+        }
+        # execve (explicit path) and snprintf must NOT fire.
+        assert "execve" not in symbols
+        assert "snprintf" not in symbols
+        for f in findings:
+            assert f.cwe == 426
+            assert f.function
+            assert f.address.startswith("0x")
+            assert f.evidence
+            assert f.confidence in ("high", "medium", "low")
+
+    def test_clean_session_no_findings(self) -> None:
+        # Only explicit-path launchers (execv/execve/posix_spawn) are imported.
+        assert cwe426.detect(cwe426_clean_session()) == []
+
+    def test_does_not_flag_absent_routine(self) -> None:
+        # clean-baseline has none of the CWE-426 routines.
+        assert cwe426.detect(clean_baseline_session()) == []

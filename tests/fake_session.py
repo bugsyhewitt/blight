@@ -1116,3 +1116,99 @@ def arm64_strcpy_vuln_session() -> FakeR2Session:
     imports = [Import(name="strcpy", plt=0x710)]
     xrefs = {0x710: [Xref(0x830, "CALL", "copy_it", "bl sym.imp.strcpy")]}
     return FakeR2Session(imports, xrefs, arch="arm64")
+
+
+# --- CWE-426 untrusted-search-path fixtures --------------------------------
+#
+# Pure PLT-lookup detector (same shape as CWE-327 / CWE-89 / CWE-676): the
+# presence of a call to a search-path-resolving routine is the finding. No data
+# flow — the weakness is the resolution mechanism ($PATH / LD_LIBRARY_PATH /
+# rpath / CWD), not the argument, so even a constant name is hijackable.
+
+def dlopen_vuln_session() -> FakeR2Session:
+    """A single dlopen() call (HIGH — library resolved via loader search path)."""
+    imports = [Import(name="dlopen", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "load_plugin", "call sym.imp.dlopen")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def dlmopen_vuln_session() -> FakeR2Session:
+    """A single dlmopen() call (HIGH — library resolved via loader search path)."""
+    imports = [Import(name="dlmopen", plt=0x401050)]
+    xrefs = {
+        0x401050: [Xref(0x401172, "CALL", "load_ns", "call sym.imp.dlmopen")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def execvp_searchpath_vuln_session() -> FakeR2Session:
+    """A single execvp() call (HIGH — program resolved via $PATH)."""
+    imports = [Import(name="execvp", plt=0x401060)]
+    xrefs = {0x401060: [Xref(0x401184, "CALL", "spawn_tool", "call sym.imp.execvp")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def execlp_searchpath_vuln_session() -> FakeR2Session:
+    """A single execlp() call (HIGH — program resolved via $PATH)."""
+    imports = [Import(name="execlp", plt=0x401070)]
+    xrefs = {0x401070: [Xref(0x401196, "CALL", "run_helper", "call sym.imp.execlp")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def popen_searchpath_vuln_session() -> FakeR2Session:
+    """A single popen() call (HIGH — runs /bin/sh -c, $PATH resolution)."""
+    imports = [Import(name="popen", plt=0x401080)]
+    xrefs = {0x401080: [Xref(0x4011a8, "CALL", "read_proc", "call sym.imp.popen")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def system_searchpath_vuln_session() -> FakeR2Session:
+    """A single system() call (HIGH — runs /bin/sh -c, $PATH resolution).
+
+    Note: this is the *same symbol* CWE-78 inspects for command injection, but
+    CWE-426 flags it for a different reason (the $PATH resolution mechanism), so
+    a call site can legitimately carry both findings.
+    """
+    imports = [Import(name="system", plt=0x401090)]
+    xrefs = {0x401090: [Xref(0x4011ba, "CALL", "run_cmd", "call sym.imp.system")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe426_all_session() -> FakeR2Session:
+    """One call to each of the seven CWE-426 routines.
+
+    Includes safe neighbours (execve — explicit path, no $PATH search; and
+    snprintf) that must NOT fire.
+    """
+    imports = [
+        Import(name="dlopen", plt=0x401040),
+        Import(name="dlmopen", plt=0x401050),
+        Import(name="execlp", plt=0x401060),
+        Import(name="execvp", plt=0x401070),
+        Import(name="execvpe", plt=0x401080),
+        Import(name="popen", plt=0x401090),
+        Import(name="system", plt=0x4010a0),
+        Import(name="execve", plt=0x4010b0),   # explicit path — must NOT fire
+        Import(name="snprintf", plt=0x4010c0),  # safe neighbour — must NOT fire
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "load_plugin", "call sym.imp.dlopen")],
+        0x401050: [Xref(0x401172, "CALL", "load_ns", "call sym.imp.dlmopen")],
+        0x401060: [Xref(0x401184, "CALL", "run_helper", "call sym.imp.execlp")],
+        0x401070: [Xref(0x401196, "CALL", "spawn_tool", "call sym.imp.execvp")],
+        0x401080: [Xref(0x4011a8, "CALL", "spawn_env", "call sym.imp.execvpe")],
+        0x401090: [Xref(0x4011ba, "CALL", "read_proc", "call sym.imp.popen")],
+        0x4010a0: [Xref(0x4011cc, "CALL", "run_cmd", "call sym.imp.system")],
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe426_clean_session() -> FakeR2Session:
+    """Only explicit-path / safe launchers imported — no CWE-426 sink present."""
+    imports = [
+        Import(name="execv", plt=0x401040),
+        Import(name="execve", plt=0x401050),
+        Import(name="posix_spawn", plt=0x401060),
+        Import(name="printf", plt=0x401070),
+    ]
+    return FakeR2Session(imports, xrefs={})

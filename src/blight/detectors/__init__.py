@@ -26,6 +26,7 @@ from . import (
     cwe252,
     cwe295,
     cwe327,
+    cwe426,
     cwe476,
     cwe676,
 )
@@ -44,6 +45,7 @@ DETECTORS: dict[int, Detector] = {
     252: cwe252.detect,
     295: cwe295.detect,
     327: cwe327.detect,
+    426: cwe426.detect,
     476: cwe476.detect,
     676: cwe676.detect,
 }
