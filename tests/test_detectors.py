@@ -20,6 +20,7 @@ from blight.detectors import (
     cwe330,
     cwe362,
     cwe369,
+    cwe377,
     cwe401,
     cwe415,
     cwe416,
@@ -236,6 +237,13 @@ from tests.fake_session import (
     cwe732_arm64_chmod_world_writable_vuln_session,
     cwe732_arm64_chmod_safe_mode_session,
     cwe732_multi_call_session,
+    tempnam_vuln_session,
+    tmpnam_r_vuln_session,
+    tmpfile_vuln_session,
+    tmpfile64_vuln_session,
+    cwe377_all_session,
+    cwe377_clean_session,
+    cwe377_does_not_overlap_cwe676_session,
 )
 
 
@@ -1986,3 +1994,112 @@ class TestCwe131:
         findings = cwe131.detect(cwe131_multi_call_session())
         assert len(findings) == 1
         assert findings[0].address == hex(0x40113A)
+class TestCwe377:
+    def test_flags_tempnam_high(self) -> None:
+        findings = cwe377.detect(tempnam_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 377
+        assert f.symbol == "tempnam"
+        assert f.function == "build_path"
+        assert f.address == hex(0x401160)
+        assert "HIGH" in f.evidence
+        assert "mkstemp" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_tmpnam_r_high(self) -> None:
+        findings = cwe377.detect(tmpnam_r_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 377
+        assert f.symbol == "tmpnam_r"
+        assert f.function == "name_temp"
+        assert f.address == hex(0x401172)
+        assert "HIGH" in f.evidence
+        assert "mkstemp" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_tmpfile_medium(self) -> None:
+        findings = cwe377.detect(tmpfile_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 377
+        assert f.symbol == "tmpfile"
+        assert f.function == "open_scratch"
+        assert f.address == hex(0x401184)
+        assert "MEDIUM" in f.evidence
+        assert "O_TMPFILE" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_tmpfile64_medium(self) -> None:
+        findings = cwe377.detect(tmpfile64_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 377
+        assert f.symbol == "tmpfile64"
+        assert f.function == "large_scratch"
+        assert "MEDIUM" in f.evidence
+        assert "O_TMPFILE" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_all_four_functions(self) -> None:
+        findings = cwe377.detect(cwe377_all_session())
+        symbols = {f.symbol for f in findings}
+        assert symbols == {"tempnam", "tmpnam_r", "tmpfile", "tmpfile64"}
+        for f in findings:
+            assert f.cwe == 377
+            assert f.function
+            assert f.address.startswith("0x")
+            assert f.evidence
+
+    def test_all_session_severities_and_confidences_match(self) -> None:
+        findings = cwe377.detect(cwe377_all_session())
+        by_symbol = {f.symbol: f for f in findings}
+        # HIGH tier
+        assert by_symbol["tempnam"].confidence == "high"
+        assert "HIGH" in by_symbol["tempnam"].evidence
+        assert by_symbol["tmpnam_r"].confidence == "high"
+        assert "HIGH" in by_symbol["tmpnam_r"].evidence
+        # MEDIUM tier
+        assert by_symbol["tmpfile"].confidence == "medium"
+        assert "MEDIUM" in by_symbol["tmpfile"].evidence
+        assert by_symbol["tmpfile64"].confidence == "medium"
+        assert "MEDIUM" in by_symbol["tmpfile64"].evidence
+
+    def test_does_not_flag_safe_replacements(self) -> None:
+        # cwe377_all_session imports both mkstemp and mkostemp alongside the
+        # vulnerable functions; these must NOT appear in the findings.
+        findings = cwe377.detect(cwe377_all_session())
+        flagged_symbols = {f.symbol for f in findings}
+        assert "mkstemp" not in flagged_symbols
+        assert "mkostemp" not in flagged_symbols
+
+    def test_clean_session_no_findings(self) -> None:
+        # Only safe replacements are imported — nothing for CWE-377 to flag.
+        assert cwe377.detect(cwe377_clean_session()) == []
+
+    def test_does_not_flag_absent_function(self) -> None:
+        # clean-baseline has none of the CWE-377 functions.
+        assert cwe377.detect(clean_baseline_session()) == []
+
+    def test_complementary_with_cwe676_no_double_flagging(self) -> None:
+        # tmpnam belongs to CWE-676; tempnam belongs to CWE-377. A session that
+        # imports both must produce exactly one CWE-377 finding (for tempnam),
+        # and that finding must NOT be on the tmpnam call site.
+        findings = cwe377.detect(cwe377_does_not_overlap_cwe676_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "tempnam"
+        assert f.function == "modern_name"
+        # CWE-377 must not flag the tmpnam site — that is CWE-676's territory.
+        assert "tmpnam" not in {finding.symbol for finding in findings}
+
+    def test_cwe676_does_not_flag_cwe377_symbols(self) -> None:
+        # Reverse sanity: the same combined session, when scanned by CWE-676,
+        # must NOT flag tempnam (which is CWE-377 territory).
+        from blight.detectors import cwe676 as _cwe676
+        findings = _cwe676.detect(cwe377_does_not_overlap_cwe676_session())
+        flagged = {f.symbol for f in findings}
+        assert "tempnam" not in flagged
+        # And CWE-676 still picks up tmpnam as expected.
+        assert "tmpnam" in flagged

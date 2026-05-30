@@ -138,6 +138,9 @@ is, not how severe the bug would be if exploited:
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-330 (parsed predictable seed — clock/pid return or small constant immediate), CWE-426, CWE-676 (HIGH-severity symbols), CWE-732 (parsed constant world-writable mode), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
 | `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-131 (an allocator's size argument traces back to a strlen-family return with no +1 adjustment in the in-function view but reachability of the allocation along that strlen path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-191 (a size argument is produced by an unguarded subtraction but whether the operands actually underflow at runtime is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
+| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-330 (parsed predictable seed — clock/pid return or small constant immediate), CWE-377 (HIGH-severity symbols — `tempnam`/`tmpnam_r`), CWE-426, CWE-676 (HIGH-severity symbols), CWE-732 (parsed constant world-writable mode), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
+| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-377 (MEDIUM-severity symbols — `tmpfile`/`tmpfile64`), CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
+| `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-191 (a size argument is produced by an unguarded subtraction but whether the operands actually underflow at runtime is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
@@ -307,6 +310,8 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
 in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-131, CWE-134, CWE-191, CWE-197,
 CWE-252, CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416,
+in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-191, CWE-197, CWE-252,
+CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-377, CWE-401, CWE-415, CWE-416,
 CWE-426, CWE-476, CWE-676, CWE-732, and CWE-798 were added post-v0.1 (see
 [POST_V01.md](POST_V01.md)).
 
@@ -988,6 +993,50 @@ function is reported by its entry address (radare2's `aflj` carries the offset,
 not a resolved name, for this anchorless check). The detector is architecture-
 aware on x86_64 and AArch64.
 
+### CWE-377 — Insecure Temporary File
+
+Calls to libc routines that create temporary *files* (or reserve temporary
+*filenames* in a file-creating idiom) through historically insecure mechanisms.
+The weakness is intrinsic to the routine: a predictable name combined with a
+non-atomic creation step lets an attacker who can write the temp directory race
+or pre-create the file with a symlink, redirecting the privileged program's
+write into an attacker-chosen target.
+
+Two severity tiers:
+
+* **HIGH** — `tempnam`, `tmpnam_r`. These return a unique *name* but do not
+  open the file. The caller must then `open(name, O_CREAT, ...)`, opening a
+  TOCTOU window in which an attacker swaps the name for a symlink before the
+  `open` runs. The Linux `tempnam(3)` manual page literally says "Never use
+  this function. Use `mkstemp(3)` or `tmpfile(3)` instead.". `tmpnam_r` is the
+  reentrant form of `tmpnam` with the same race window.
+* **MEDIUM** — `tmpfile`, `tmpfile64`. These *do* atomically open a temp file
+  and on modern glibc with kernel `O_TMPFILE` support are essentially safe,
+  but on legacy glibc fallback paths and a number of embedded/alternative
+  libcs (uClibc-ng, older musl, BSD) `tmpfile` is implemented in terms of
+  `mkstemp` against the `P_tmpdir` template — confirm the target libc takes
+  the `O_TMPFILE` fast path, or migrate to an explicit
+  `open(dir, O_TMPFILE|O_RDWR, 0600)` against a trusted dirfd.
+
+Like CWE-22, CWE-89, CWE-119, CWE-295, CWE-327, CWE-362, CWE-426, CWE-676 and
+CWE-732 this is a pure PLT-lookup check — the call to one of the insecure
+temp-file primitives is itself the finding. The detector does not (and need
+not) read any argument out of the disassembly, because the weakness is
+intrinsic to the routine. The safe replacements `mkstemp` / `mkostemp` /
+`mkstemps` / `mkostemps` / `mkdtemp` and the explicit `open` + `O_TMPFILE` /
+`O_EXCL` idiom are deliberately **not** flagged — they are the recommended
+mitigation and flagging them would invert the signal.
+
+This is deliberately distinct from CWE-676 (which flags `tmpnam` / `mktemp`
+as part of the broader inherently-dangerous-function family): the two
+detectors are complementary — CWE-676 is "this function should not appear in
+new code at all", CWE-377 is "this is the *insecure temp file* class
+specifically". A `tmpnam` call site is therefore not double-flagged here —
+CWE-676 already owns it. Confidence mirrors the per-symbol severity
+(HIGH → `high`, MEDIUM → `medium`) since the PLT match is certain.
+Architecture-agnostic — the detector works on every arch radare2 can
+disassemble.
+
 ### CWE-401 — Missing Release of Memory after Effective Lifetime
 
 A **heap buffer** is obtained from an allocator (`malloc`, `calloc`, `realloc`,
@@ -1424,7 +1473,7 @@ $ blight --binary path/to/elf --checks 798 --format json
 `blight` supports **x86_64** and **AArch64 (arm64)** ELF binaries.
 
 The CWE-22, CWE-89, CWE-119, CWE-120, CWE-242, CWE-295, CWE-327, CWE-362,
-CWE-426, and CWE-676 detectors flag any call site to a dangerous symbol and are therefore architecture-agnostic
+CWE-377, CWE-426, and CWE-676 detectors flag any call site to a dangerous symbol and are therefore architecture-agnostic
 — they work on every architecture radare2 can disassemble. CWE-798 is likewise
 architecture-agnostic (it scans string data, not the call graph). The CWE-78 and CWE-134 detectors inspect
 the register that carries a specific argument (the command string, the format

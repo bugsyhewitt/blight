@@ -266,6 +266,57 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
   the multi-call-site mixed case; the `--checks all` (`test_cli`) and
   SARIF level-mapping (`test_sarif`) assertions were updated to include
   `131`. Unit test count 439 → 453.
+- **CWE-377 — Insecure Temporary File** (post-backlog; new pure-PLT detector).
+  `src/blight/detectors/cwe377.py` flags call sites to libc routines that
+  create temporary files (or reserve temporary filenames in a file-creating
+  idiom) through historically insecure mechanisms — distinct from the
+  `tmpnam`/`mktemp` pair already flagged by CWE-676 (which is "use of
+  inherently dangerous function" more broadly). Two severity tiers: HIGH for
+  `tempnam` and `tmpnam_r` (they return a unique *name* but do not open the
+  file, opening a TOCTOU window in which an attacker who can write the parent
+  directory swaps the name for a symlink before the caller's
+  `open(name, O_CREAT, ...)` runs — the Linux `tempnam(3)` manual page
+  literally says "Never use this function. Use `mkstemp(3)` or `tmpfile(3)`
+  instead."), and MEDIUM for `tmpfile` and `tmpfile64` (which *do* atomically
+  open a temp file and are safe on modern glibc with kernel `O_TMPFILE`
+  support, but fall back to `mkstemp` against `P_tmpdir` on legacy glibc and
+  embedded/alternative libcs — uClibc-ng, older musl pre-1.2, BSD — where the
+  template-permission and `TMPDIR`-attacker concerns reappear; the MEDIUM tier
+  is the "audit-and-confirm" signal). The safe replacements `mkstemp` /
+  `mkostemp` / `mkstemps` / `mkostemps` / `mkdtemp` and the explicit
+  `open` + `O_TMPFILE` / `O_EXCL` idiom are deliberately not flagged — they
+  are the recommended mitigation and flagging them would invert the signal.
+  **Chosen as the next improvement after verifying both originally-named
+  candidates (CWE-416 use-after-free, CWE-362 race condition) were already
+  shipped**: per the worker pivot protocol, when both target CWEs are already
+  detectors in the codebase the next-best gap from the post-v0.1 directions
+  should be selected. The remaining named high-yield classes (CWE-190 integer
+  overflow, CWE-457 uninitialized variable) still require symbolic execution
+  or CFG/value-flow modeling that POST_V01 records as out of scope, whereas
+  insecure-temp-file fits the existing precision-first PLT-and-arg-symbol
+  machinery exactly (the same shape as CWE-22 / CWE-89 / CWE-119 / CWE-295 /
+  CWE-327 / CWE-362 / CWE-426 / CWE-676 / CWE-732). Like CWE-676 it is a
+  *pure PLT-lookup* detector built on the existing `_common.call_sites`
+  helper — the symbol is the finding, no data-flow context is needed — so it
+  required zero new infrastructure and is architecture-agnostic. Deliberately
+  complementary, not overlapping, with CWE-676: CWE-676 owns `tmpnam` and
+  `mktemp` (and the broader inherently-dangerous-function family `strtok` /
+  `asctime` / `ctime` / `rand`), CWE-377 owns `tempnam`, `tmpnam_r`,
+  `tmpfile`, `tmpfile64`. A `tmpnam` call site is therefore not double-flagged
+  here. Confidence mirrors the per-symbol severity (HIGH → `high`,
+  MEDIUM → `medium`), mirroring the CWE-676 / CWE-732 policy; SARIF maps
+  CWE-377 to level `error`. Registered as check `377`, so the
+  `--checks {…,377,…,all}` token and the `all` set wire in automatically
+  through the `DETECTORS` dispatch dict. 11 new unit tests
+  (`tests/test_detectors.py::TestCwe377`) covering each of the four flagged
+  symbols, the all-four mixed session with confidence/severity assertions,
+  the safe-replacement-not-flagged assertion, the clean-session and
+  clean-baseline negatives, and a complementary-with-CWE-676 non-overlap
+  assertion (verifying that a binary importing both `tmpnam` and `tempnam`
+  produces exactly one CWE-377 finding for `tempnam`, and that CWE-676 still
+  picks up `tmpnam` from the same session); the `--checks all` (`test_cli`)
+  and SARIF level-mapping (`test_sarif`) assertions were updated to include
+  `377`. Unit test count 378 → 389.
 
 - **CWE-330 — Use of Insufficiently Random Values** (predictable PRNG
   seeding; the *seeding* sibling of CWE-676's bare-`rand` detector). Built on
