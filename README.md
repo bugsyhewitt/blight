@@ -43,13 +43,13 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {22,78,89,119,120,122,131,134,197,242,252,295,327,362,369,401,415,416,426,476,676,732,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {22,78,89,119,120,122,131,134,197,242,250,252,295,327,362,369,401,415,416,426,476,676,732,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
 - `--checks` — which CWE check to run; one of `22`, `78`, `89`, `119`, `120`,
-  `122`, `131`, `134`, `191`, `197`, `242`, `252`, `295`, `327`, `330`, `362`,
+  `122`, `131`, `134`, `191`, `197`, `242`, `250`, `252`, `295`, `327`, `330`, `362`,
   `369`, `401`, `415`, `416`, `426`, `476`, `676`, `732`, `798`, or `all`
   (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
@@ -310,10 +310,10 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
 in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-131, CWE-134, CWE-191, CWE-197,
 CWE-252, CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416,
-in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-191, CWE-197, CWE-252,
-CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-377, CWE-401, CWE-415, CWE-416,
-CWE-426, CWE-476, CWE-676, CWE-732, and CWE-798 were added post-v0.1 (see
-[POST_V01.md](POST_V01.md)).
+in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-191, CWE-197, CWE-250,
+CWE-252, CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-377, CWE-401, CWE-415,
+CWE-416, CWE-426, CWE-476, CWE-676, CWE-732, and CWE-798 were added post-v0.1
+(see [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
 
@@ -734,6 +734,47 @@ $ blight --binary tests/fixtures/gets-vuln --checks 242 --format json
       "address": "0x401159",
       "evidence": "call to gets: gets cannot be used safely and was removed from C11",
       "symbol": "gets",
+      "confidence": "high"
+    }
+  ]
+}
+```
+
+### CWE-250 — Execution with Unnecessary Privileges
+
+Calls to the libc privilege-change family (`setuid`, `seteuid`, `setgid`,
+`setegid`, `setreuid`, `setregid`, `setresuid`, `setresgid`) where **every**
+uid/gid argument is a literal `0` — the binary explicitly asks to run as root.
+This is the canonical CWE-250 mistake in shipped binaries: a setuid-root helper
+that was intended to *drop* privileges instead re-escalates to uid 0 on every
+run, removing the safety boundary the surrounding code may have been written to
+assume.
+
+This is a hybrid detector — PLT lookup locates the call sites, then the same
+per-architecture argument-register inspection used by CWE-732 and CWE-330 parses
+the immediate operand that last writes each id register. For the multi-argument
+forms (`setreuid` / `setregid` / `setresuid` / `setresgid`) **every** id must
+parse as literal `0`; the `setreuid(-1, 0)` "leave the real uid unchanged"
+idiom and the `setuid(65534)` drop-to-nobody pattern are intentionally NOT
+flagged, and a non-constant id (register/memory operand) is also not flagged.
+Both the `xor reg, reg` x86_64 and `eor reg, reg, reg` AArch64 zeroing idioms
+are recognised as literal `0`. Deliberately complementary with CWE-252 (which
+flags the same family when the *return value* is discarded — failure to change
+privileges goes undetected); CWE-250 instead asks whether the privilege level
+being requested is root, so a call site can legitimately carry both findings.
+
+```bash
+$ blight --binary tests/fixtures/setuid-zero-vuln --checks 250 --format json
+{
+  "binary": "tests/fixtures/setuid-zero-vuln",
+  "checks": [250],
+  "findings": [
+    {
+      "cwe": 250,
+      "function": "become_root",
+      "address": "0x401160",
+      "evidence": "[HIGH] call to setuid with uid/gid argument is literal 0 (root) (execution with unnecessary root privileges)",
+      "symbol": "setuid",
       "confidence": "high"
     }
   ]
