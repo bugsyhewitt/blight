@@ -9,6 +9,7 @@ from blight.detectors import (
     cwe119,
     cwe120,
     cwe122,
+    cwe131,
     cwe134,
     cwe191,
     cwe197,
@@ -117,6 +118,20 @@ from tests.fake_session import (
     cwe191_arm64_malloc_sub_vuln_session,
     cwe191_arm64_sub_guarded_session,
     cwe191_multi_call_session,
+    cwe131_malloc_strlen_no_plus_one_vuln_session,
+    cwe131_malloc_strlen_plus_one_safe_session,
+    cwe131_malloc_strlen_inc_safe_session,
+    cwe131_realloc_strlen_no_plus_one_vuln_session,
+    cwe131_calloc_strlen_no_plus_one_vuln_session,
+    cwe131_aliased_strlen_vuln_session,
+    cwe131_malloc_constant_size_session,
+    cwe131_size_reloaded_safe_session,
+    cwe131_intervening_call_safe_session,
+    cwe131_no_strlen_import_session,
+    cwe131_arm64_malloc_strlen_no_plus_one_vuln_session,
+    cwe131_arm64_malloc_strlen_plus_one_safe_session,
+    cwe131_multi_call_session,
+    cwe131_wcslen_no_plus_one_vuln_session,
     free_then_deref_vuln_session,
     free_then_null_assign_session,
     free_then_xor_zero_session,
@@ -1880,3 +1895,94 @@ class TestCwe330:
         assert f.function == "predictable_seed"
         assert "HIGH" in f.evidence
         assert "time" in f.evidence
+
+
+class TestCwe131:
+    """CWE-131 Incorrect Buffer-Size Calculation — PLT-anchored, single-function
+    backward scan: an allocator's size argument is a strlen-family return that
+    is never adjusted by ``+ 1`` for the NUL terminator (off-by-one heap
+    overflow on subsequent string copy)."""
+
+    def test_flags_malloc_strlen_no_plus_one(self) -> None:
+        findings = cwe131.detect(cwe131_malloc_strlen_no_plus_one_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 131
+        assert f.symbol == "malloc"
+        assert f.confidence == "low"
+        assert f.address == hex(0x401160)
+        assert "strlen" in f.evidence
+        assert "NUL" in f.evidence
+
+    def test_strlen_plus_one_not_flagged(self) -> None:
+        # ``add rax, 1`` after strlen accounts for the NUL → safe.
+        assert cwe131.detect(cwe131_malloc_strlen_plus_one_safe_session()) == []
+
+    def test_strlen_inc_not_flagged(self) -> None:
+        # ``inc rax`` is the same +1 adjustment in a different mnemonic.
+        assert cwe131.detect(cwe131_malloc_strlen_inc_safe_session()) == []
+
+    def test_flags_realloc_strlen(self) -> None:
+        # realloc carries size in arg1 (rsi). Same off-by-one fingerprint.
+        findings = cwe131.detect(cwe131_realloc_strlen_no_plus_one_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "realloc"
+        assert f.address == hex(0x401210)
+
+    def test_flags_calloc_strlen(self) -> None:
+        # calloc's per-element size (arg1) is the unadjusted strlen result.
+        findings = cwe131.detect(cwe131_calloc_strlen_no_plus_one_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "calloc"
+
+    def test_flags_through_register_alias(self) -> None:
+        # strlen → rax; rbx = rax; rdi = rbx → the size traces back to strlen.
+        findings = cwe131.detect(cwe131_aliased_strlen_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "malloc"
+
+    def test_constant_size_not_flagged(self) -> None:
+        # malloc(0x40) — constant size, no strlen → safe.
+        assert cwe131.detect(cwe131_malloc_constant_size_session()) == []
+
+    def test_size_reloaded_after_strlen_not_flagged(self) -> None:
+        # The size register is reloaded from memory after the strlen call →
+        # the value reaching malloc is NOT the strlen return → safe.
+        assert cwe131.detect(cwe131_size_reloaded_safe_session()) == []
+
+    def test_intervening_call_not_flagged(self) -> None:
+        # A non-strlen call between the strlen and the allocator clobbers rax
+        # → the heuristic conservatively gives up (suppress over false-flag).
+        assert cwe131.detect(cwe131_intervening_call_safe_session()) == []
+
+    def test_no_strlen_import_no_findings(self) -> None:
+        assert cwe131.detect(cwe131_no_strlen_import_session()) == []
+
+    def test_flags_wcslen_no_plus_one(self) -> None:
+        # The wide-character sibling has the same off-by-one shape.
+        findings = cwe131.detect(cwe131_wcslen_no_plus_one_vuln_session())
+        assert len(findings) == 1
+        assert "wcslen" in findings[0].evidence
+
+    def test_flags_arm64_malloc_strlen_no_plus_one(self) -> None:
+        findings = cwe131.detect(
+            cwe131_arm64_malloc_strlen_no_plus_one_vuln_session()
+        )
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 131
+        assert f.symbol == "malloc"
+        assert f.address == hex(0x848)
+
+    def test_arm64_strlen_plus_one_not_flagged(self) -> None:
+        # ``add x0, x0, 1`` accounts for the NUL on AArch64 → safe.
+        assert cwe131.detect(
+            cwe131_arm64_malloc_strlen_plus_one_safe_session()
+        ) == []
+
+    def test_scans_every_call_site(self) -> None:
+        # Two malloc sites: one strlen-sized (flag), one constant (skip).
+        findings = cwe131.detect(cwe131_multi_call_session())
+        assert len(findings) == 1
+        assert findings[0].address == hex(0x40113A)

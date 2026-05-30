@@ -43,14 +43,14 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {22,78,89,119,120,122,134,197,242,252,295,327,362,369,401,415,416,426,476,676,732,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {22,78,89,119,120,122,131,134,197,242,252,295,327,362,369,401,415,416,426,476,676,732,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
 - `--checks` — which CWE check to run; one of `22`, `78`, `89`, `119`, `120`,
-  `122`, `134`, `191`, `197`, `242`, `252`, `295`, `327`, `330`, `362`, `369`,
-  `401`, `415`, `416`, `426`, `476`, `676`, `732`, `798`, or `all`
+  `122`, `131`, `134`, `191`, `197`, `242`, `252`, `295`, `327`, `330`, `362`,
+  `369`, `401`, `415`, `416`, `426`, `476`, `676`, `732`, `798`, or `all`
   (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
@@ -137,7 +137,7 @@ is, not how severe the bug would be if exploited:
 |---|---|---|
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-330 (parsed predictable seed — clock/pid return or small constant immediate), CWE-426, CWE-676 (HIGH-severity symbols), CWE-732 (parsed constant world-writable mode), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
-| `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-191 (a size argument is produced by an unguarded subtraction but whether the operands actually underflow at runtime is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
+| `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-131 (an allocator's size argument traces back to a strlen-family return with no +1 adjustment in the in-function view but reachability of the allocation along that strlen path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-191 (a size argument is produced by an unguarded subtraction but whether the operands actually underflow at runtime is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
 evidence string (HIGH→`high`, MEDIUM→`medium`, LOW→`low`). The field is also
@@ -305,9 +305,9 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-191, CWE-197, CWE-252,
-CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416, CWE-426,
-CWE-476, CWE-676, CWE-732, and CWE-798 were added post-v0.1 (see
+in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-131, CWE-134, CWE-191, CWE-197,
+CWE-252, CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416,
+CWE-426, CWE-476, CWE-676, CWE-732, and CWE-798 were added post-v0.1 (see
 [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
@@ -522,6 +522,69 @@ $ blight --binary path/to/elf --checks 122 --format json
   ]
 }
 ```
+
+### CWE-131 — Incorrect Calculation of Buffer Size
+
+An allocation whose **size argument is the return of `strlen` / `wcslen` with
+no `+ 1` adjustment for the NUL terminator**. The canonical C source is
+`buf = malloc(strlen(src)); strcpy(buf, src);` — the buffer is one byte short
+of holding the string plus its terminator, so the `strcpy` writes the NUL byte
+past the end of the heap allocation. This off-by-one heap overflow is one of
+the most-cited examples of CWE-131 (see the entry on cwe.mitre.org) and is
+endemic in legacy C that still treats `strlen` returns as full-string buffer
+sizes.
+
+This is the *narrow, statically-visible* slice of CWE-131. blight does **not**
+attempt the general buffer-size-calculation problem (proving an arbitrary
+arithmetic expression sizes a buffer correctly needs value-range / symbolic
+analysis that blight keeps out of scope — the same reason CWE-190 integer
+overflow is deferred). Instead it anchors on the fingerprint it can see: a
+sized allocation whose size register traces back, through register-alias
+propagation, to the return of `strlen` with no intervening adjustment by one.
+
+This is a PLT-anchored, single-function **backward** scan (the same machinery
+as CWE-122, CWE-191 and CWE-369). The detector finds every call site to an
+allocator — `malloc` / `alloca` / `valloc` / `pvalloc` (size in arg0),
+`realloc` / `reallocarray` / `calloc` (size in arg1) — resolves that
+argument's register per architecture (`rdi`/`rsi` on x86_64, `x0`/`x1` on
+AArch64), then walks backward:
+
+- if the size register (or a register it was moved from) is the **destination
+  of an `inc` / `add ..., 1`** (x86_64) or `add D, S, #1` (AArch64), the
+  program accounted for the NUL terminator → not flagged;
+- if a non-`strlen` **call** is reached while the return register (`rax`/`x0`)
+  is alive, that call clobbers the return register and breaks the chain →
+  not flagged (conservative);
+- if the return register is alive when we reach a **`call strlen` /
+  `call wcslen`**, the size was produced by `strlen` and never adjusted by
+  one → flagged.
+
+```bash
+$ blight --binary path/to/elf --checks 131 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [131],
+  "findings": [
+    {
+      "cwe": 131,
+      "function": "build_buf",
+      "address": "0x401160",
+      "evidence": "size argument to malloc is the return of strlen with no +1 adjustment for the NUL terminator (off-by-one buffer size — heap overflow on subsequent string copy)",
+      "symbol": "malloc",
+      "confidence": "low"
+    }
+  ]
+}
+```
+
+Reachability of the allocation along the strlen path is not proven
+statically, so every CWE-131 finding is `low` confidence — it marks a
+*statically-visible* unadjusted `strlen`-sized allocation. The detector is
+architecture-aware on x86_64 and AArch64. It is kept distinct from CWE-122
+(heap overflow via unbounded copy of a heap buffer): CWE-122 anchors on the
+*destination* of the copy; CWE-131 anchors on the *size* of the allocation
+itself — the upstream off-by-one source. A call site can legitimately carry
+both findings.
 
 ### CWE-134 — Use of Externally-Controlled Format String
 

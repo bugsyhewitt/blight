@@ -214,6 +214,59 @@ rate is already low (PLT-based detection) and the benefit grows with user base.
 
 ## Shipped
 
+- **CWE-131 — Incorrect Calculation of Buffer Size** (post-backlog; the
+  upstream off-by-one sibling of CWE-122). `src/blight/detectors/cwe131.py`
+  flags the textbook NUL-terminator off-by-one: an allocation
+  (`malloc` / `calloc` / `realloc` / `reallocarray` / `alloca` / `valloc` /
+  `pvalloc` / `__builtin_alloca`) whose **size argument is the return of
+  `strlen` / `wcslen` with no `+ 1` adjustment** for the trailing NUL byte.
+  The canonical C source is `buf = malloc(strlen(src)); strcpy(buf, src);` —
+  the buffer is one byte short of holding the string plus its terminator, so
+  the `strcpy` writes the NUL past the end of the heap allocation. **Chosen
+  over CWE-252** (the original next-detector candidate) after auditing the
+  source tree: CWE-252 already shipped in R8 (`src/blight/detectors/cwe252.py`)
+  via the conservative linear-scan check-vs-clobber heuristic, so the
+  task's first suggestion was a no-op; CWE-131 was the next named candidate
+  and is the highest-value unshipped MITRE-listed memory-corruption gap that
+  fits blight's existing precision-first PLT-anchored backward-scan machinery
+  (the same shape as the shipped CWE-191 size-from-subtraction detector and
+  the shipped CWE-122 alias-tracking heap-overflow detector). Implementation
+  mirrors CWE-191: a PLT lookup over the allocator family locates the call
+  sites, the size-argument register is resolved per-architecture via the
+  shared `_argregs.arg_register_aliases` table (arg0 for `malloc` /
+  `alloca` / `valloc` / `pvalloc`; arg1 for `realloc` / `reallocarray` /
+  `calloc`), then a single-function linear backward scan walks from the
+  allocator with an alias set seeded by the size register. A `mov D, S`
+  where `D` is tracked propagates the alias by adding `S` and dropping `D`
+  (a non-register source — immediate or memory load — terminates the chain
+  for `D` so an unrelated earlier `strlen` cannot false-positive); an
+  `inc D` or `add D, 1` (x86_64) / `add D, S, #1` (AArch64) into a tracked
+  register clears the candidate — the NUL was accounted for; a non-`strlen`
+  call clobbers the return register (`rax` on x86_64, `x0` on AArch64) and
+  breaks the alias chain (conservative — suppress over false-flag); a
+  `strlen` / `wcslen` call reached while the return register is still alive
+  is the off-by-one fingerprint. Deliberately distinct from CWE-122 (whose
+  sink is an unbounded *copy* of a heap buffer): CWE-122 anchors on the
+  destination of the copy; CWE-131 anchors on the size of the allocation
+  itself — the upstream off-by-one source. A call site can legitimately
+  carry both findings. Architecture-aware on x86_64 and AArch64 (POST_V01
+  item 5). Because the reachability of the allocation along the strlen path
+  is not proven statically, every CWE-131 finding is `low` confidence,
+  matching CWE-122 / CWE-191 / CWE-369 / CWE-476 policy. Registered as check
+  `131`, so the `--checks {…,131,…,all}` token and the `all` set wire in
+  automatically through the `DETECTORS` dispatch dict; SARIF maps CWE-131
+  to level `error`. 14 new unit tests
+  (`tests/test_detectors.py::TestCwe131`) cover the direct
+  `malloc(strlen)` off-by-one, the `realloc` (arg1) and `calloc`
+  variants, the `wcslen` wide-char sibling, the alias-propagated
+  `strlen` → `mov rbx, rax` → `mov rdi, rbx` chain, the `+1` safe cases
+  (`add rax, 1`, `inc rax`, AArch64 `add x0, x0, 1`), the size-reloaded
+  safe case, the intervening-call clobber safe case, the constant-size /
+  no-strlen-import baseline negatives, the AArch64 vuln + safe pair, and
+  the multi-call-site mixed case; the `--checks all` (`test_cli`) and
+  SARIF level-mapping (`test_sarif`) assertions were updated to include
+  `131`. Unit test count 439 → 453.
+
 - **CWE-330 — Use of Insufficiently Random Values** (predictable PRNG
   seeding; the *seeding* sibling of CWE-676's bare-`rand` detector). Built on
   the same PLT-anchored argument-register inspection used by CWE-78 / CWE-134
