@@ -3141,3 +3141,335 @@ def cwe330_multi_call_session() -> FakeR2Session:
     return FakeR2Session(
         imports, xrefs, {0x401140: vuln_ops, 0x401240: safe_ops}
     )
+
+
+# --- CWE-131 fixtures (incorrect buffer-size calculation) ------------------
+#
+# Pattern: ``malloc(strlen(s))`` — forgetting the ``+ 1`` for the NUL
+# terminator. The size argument to an allocator traces back via register-alias
+# propagation to a strlen-family return, with no intervening ``inc`` / ``add
+# ...,1`` adjustment. See ``src/blight/detectors/cwe131.py``.
+
+
+def cwe131_malloc_strlen_no_plus_one_vuln_session() -> FakeR2Session:
+    """x86_64: ``buf = malloc(strlen(src));`` — off-by-one, NUL not allocated."""
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="strlen", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "build_buf", "call sym.imp.malloc")],
+        0x401050: [Xref(0x401150, "CALL", "build_buf", "call sym.imp.strlen")],
+    }
+    ops = [
+        Instruction(0x401130, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),    # rdi = src
+        Instruction(0x401150, "call sym.imp.strlen"),           # rax = strlen(src)
+        Instruction(0x401158, "mov edi, eax"),                  # size arg → rdi
+        Instruction(0x401160, "call sym.imp.malloc"),           # ← off-by-one
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401130: ops})
+
+
+def cwe131_malloc_strlen_plus_one_safe_session() -> FakeR2Session:
+    """x86_64: ``buf = malloc(strlen(src) + 1);`` — NUL accounted for, safe."""
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="strlen", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "build_buf", "call sym.imp.malloc")],
+        0x401050: [Xref(0x401150, "CALL", "build_buf", "call sym.imp.strlen")],
+    }
+    ops = [
+        Instruction(0x401130, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401150, "call sym.imp.strlen"),
+        Instruction(0x401155, "add rax, 1"),                    # +1 for NUL
+        Instruction(0x401158, "mov edi, eax"),
+        Instruction(0x401160, "call sym.imp.malloc"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401130: ops})
+
+
+def cwe131_malloc_strlen_inc_safe_session() -> FakeR2Session:
+    """x86_64: ``inc rax`` after strlen also counts as the +1 adjustment."""
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="strlen", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "build_buf", "call sym.imp.malloc")],
+        0x401050: [Xref(0x401150, "CALL", "build_buf", "call sym.imp.strlen")],
+    }
+    ops = [
+        Instruction(0x401130, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401150, "call sym.imp.strlen"),
+        Instruction(0x401155, "inc rax"),                       # +1 via inc
+        Instruction(0x401158, "mov edi, eax"),
+        Instruction(0x401160, "call sym.imp.malloc"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401130: ops})
+
+
+def cwe131_realloc_strlen_no_plus_one_vuln_session() -> FakeR2Session:
+    """x86_64: ``realloc(buf, strlen(s));`` — realloc carries size in arg1 (rsi)."""
+    imports = [
+        Import(name="realloc", plt=0x401040),
+        Import(name="strlen", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401210, "CALL", "grow_buf", "call sym.imp.realloc")],
+        0x401050: [Xref(0x401200, "CALL", "grow_buf", "call sym.imp.strlen")],
+    }
+    ops = [
+        Instruction(0x4011f0, "push rbp"),
+        Instruction(0x4011f8, "mov rdi, qword [rbp - 0x10]"),   # rdi = s
+        Instruction(0x401200, "call sym.imp.strlen"),
+        Instruction(0x401204, "mov esi, eax"),                  # size arg (arg1)
+        Instruction(0x401208, "mov rdi, qword [rbp - 0x8]"),    # buf
+        Instruction(0x401210, "call sym.imp.realloc"),
+        Instruction(0x401215, "leave"),
+        Instruction(0x401216, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x4011f0: ops})
+
+
+def cwe131_calloc_strlen_no_plus_one_vuln_session() -> FakeR2Session:
+    """x86_64: ``calloc(1, strlen(s));`` — calloc's per-element size in arg1."""
+    imports = [
+        Import(name="calloc", plt=0x401040),
+        Import(name="strlen", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401210, "CALL", "zero_buf", "call sym.imp.calloc")],
+        0x401050: [Xref(0x401200, "CALL", "zero_buf", "call sym.imp.strlen")],
+    }
+    ops = [
+        Instruction(0x4011f0, "push rbp"),
+        Instruction(0x4011f8, "mov rdi, qword [rbp - 0x10]"),
+        Instruction(0x401200, "call sym.imp.strlen"),
+        Instruction(0x401204, "mov esi, eax"),                  # per-elt size
+        Instruction(0x401208, "mov edi, 1"),                    # nmemb = 1
+        Instruction(0x401210, "call sym.imp.calloc"),
+        Instruction(0x401215, "leave"),
+        Instruction(0x401216, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x4011f0: ops})
+
+
+def cwe131_aliased_strlen_vuln_session() -> FakeR2Session:
+    """x86_64: ``size = strlen(s); ptr = malloc(size);`` via register aliases.
+
+    strlen → rax; rbx = rax (alias); rdi = rbx (size arg) → off-by-one.
+    """
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="strlen", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "alias_alloc", "call sym.imp.malloc")],
+        0x401050: [Xref(0x401150, "CALL", "alias_alloc", "call sym.imp.strlen")],
+    }
+    ops = [
+        Instruction(0x401130, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401150, "call sym.imp.strlen"),
+        Instruction(0x401154, "mov rbx, rax"),                  # alias
+        Instruction(0x401158, "mov rdi, rbx"),                  # size arg
+        Instruction(0x401160, "call sym.imp.malloc"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401130: ops})
+
+
+def cwe131_malloc_constant_size_session() -> FakeR2Session:
+    """x86_64: ``malloc(0x40);`` — constant size, no strlen → safe."""
+    imports = [Import(name="malloc", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "fixed_alloc", "call sym.imp.malloc")]}
+    ops = [
+        Instruction(0x401130, "push rbp"),
+        Instruction(0x401150, "mov edi, 0x40"),
+        Instruction(0x401160, "call sym.imp.malloc"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401130: ops})
+
+
+def cwe131_size_reloaded_safe_session() -> FakeR2Session:
+    """x86_64: strlen was called, but the size is reloaded from memory after.
+
+    The value reaching malloc is the fresh memory reload — not the strlen
+    return — so the size cannot be off-by-one from strlen → safe.
+    """
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="strlen", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "reload_alloc", "call sym.imp.malloc")],
+        0x401050: [Xref(0x401150, "CALL", "reload_alloc", "call sym.imp.strlen")],
+    }
+    ops = [
+        Instruction(0x401130, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401150, "call sym.imp.strlen"),
+        Instruction(0x401155, "mov edi, dword [rbp - 0x20]"),   # fresh reload
+        Instruction(0x401160, "call sym.imp.malloc"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401130: ops})
+
+
+def cwe131_intervening_call_safe_session() -> FakeR2Session:
+    """x86_64: a non-strlen call clobbers rax between strlen and the size
+    register's final write — the value reaching malloc came from the clobbered
+    rax, so it cannot be proven to be strlen's result → safe (conservative).
+    """
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="strlen", plt=0x401050),
+        Import(name="puts", plt=0x401060),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401170, "CALL", "noisy_alloc", "call sym.imp.malloc")],
+        0x401050: [Xref(0x401150, "CALL", "noisy_alloc", "call sym.imp.strlen")],
+        0x401060: [Xref(0x401158, "CALL", "noisy_alloc", "call sym.imp.puts")],
+    }
+    ops = [
+        Instruction(0x401130, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401150, "call sym.imp.strlen"),           # rax = len
+        Instruction(0x401158, "call sym.imp.puts"),             # clobbers rax!
+        Instruction(0x401165, "mov edi, eax"),                  # size from clobbered rax
+        Instruction(0x401170, "call sym.imp.malloc"),
+        Instruction(0x401175, "leave"),
+        Instruction(0x401176, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401130: ops})
+
+
+def cwe131_no_strlen_import_session() -> FakeR2Session:
+    """No strlen-family import — nothing for CWE-131 to anchor on."""
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="puts", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "alloc_fixed", "call sym.imp.malloc")],
+    }
+    ops = [
+        Instruction(0x401130, "push rbp"),
+        Instruction(0x401150, "mov edi, 0x80"),
+        Instruction(0x401160, "call sym.imp.malloc"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401130: ops})
+
+
+def cwe131_arm64_malloc_strlen_no_plus_one_vuln_session() -> FakeR2Session:
+    """AArch64: ``malloc(strlen(s));`` — size in x0 traces back to strlen's x0."""
+    imports = [
+        Import(name="malloc", plt=0x710),
+        Import(name="strlen", plt=0x720),
+    ]
+    xrefs = {
+        0x710: [Xref(0x848, "CALL", "build_buf", "bl sym.imp.malloc")],
+        0x720: [Xref(0x83c, "CALL", "build_buf", "bl sym.imp.strlen")],
+    }
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x834, "ldr x0, [x29, 0x8]"),               # x0 = src
+        Instruction(0x83c, "bl sym.imp.strlen"),                # x0 = strlen(src)
+        Instruction(0x848, "bl sym.imp.malloc"),                # ← off-by-one
+        Instruction(0x84c, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x850, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe131_arm64_malloc_strlen_plus_one_safe_session() -> FakeR2Session:
+    """AArch64: ``malloc(strlen(s) + 1);`` — +1 via ``add x0, x0, #1`` → safe."""
+    imports = [
+        Import(name="malloc", plt=0x710),
+        Import(name="strlen", plt=0x720),
+    ]
+    xrefs = {
+        0x710: [Xref(0x848, "CALL", "build_buf", "bl sym.imp.malloc")],
+        0x720: [Xref(0x83c, "CALL", "build_buf", "bl sym.imp.strlen")],
+    }
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x834, "ldr x0, [x29, 0x8]"),
+        Instruction(0x83c, "bl sym.imp.strlen"),
+        Instruction(0x840, "add x0, x0, 1"),                    # +1 for NUL
+        Instruction(0x848, "bl sym.imp.malloc"),
+        Instruction(0x84c, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x850, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe131_multi_call_session() -> FakeR2Session:
+    """Two malloc sites: one sized by an unadjusted strlen (flag), one constant."""
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="strlen", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [
+            Xref(0x40113A, "CALL", "vuln_alloc", "call sym.imp.malloc"),
+            Xref(0x401234, "CALL", "fixed_alloc", "call sym.imp.malloc"),
+        ],
+        0x401050: [
+            Xref(0x401130, "CALL", "vuln_alloc", "call sym.imp.strlen"),
+        ],
+    }
+    vuln_ops = [
+        Instruction(0x401120, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401130, "call sym.imp.strlen"),
+        Instruction(0x401135, "mov edi, eax"),
+        Instruction(0x40113A, "call sym.imp.malloc"),           # → flag
+        Instruction(0x40113F, "ret"),
+    ]
+    fixed_ops = [
+        Instruction(0x401230, "mov edi, 0x20"),                 # constant size
+        Instruction(0x401234, "call sym.imp.malloc"),           # → skip
+        Instruction(0x401239, "ret"),
+    ]
+    return FakeR2Session(
+        imports, xrefs, {0x401120: vuln_ops, 0x401230: fixed_ops}
+    )
+
+
+def cwe131_wcslen_no_plus_one_vuln_session() -> FakeR2Session:
+    """x86_64: ``malloc(wcslen(ws));`` — wide-char variant; same off-by-one."""
+    imports = [
+        Import(name="malloc", plt=0x401040),
+        Import(name="wcslen", plt=0x401050),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "build_wbuf", "call sym.imp.malloc")],
+        0x401050: [Xref(0x401150, "CALL", "build_wbuf", "call sym.imp.wcslen")],
+    }
+    ops = [
+        Instruction(0x401130, "push rbp"),
+        Instruction(0x401140, "mov rdi, qword [rbp - 0x8]"),
+        Instruction(0x401150, "call sym.imp.wcslen"),
+        Instruction(0x401155, "mov edi, eax"),
+        Instruction(0x401160, "call sym.imp.malloc"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401130: ops})
