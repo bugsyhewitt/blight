@@ -3826,3 +3826,156 @@ def cwe250_multi_call_session() -> FakeR2Session:
     return FakeR2Session(
         imports, xrefs, {0x401140: vuln_ops, 0x401240: safe_ops}
     )
+
+
+# --- CWE-502 deserialization-of-untrusted-data fixtures --------------------
+#
+# Pure PLT-lookup detector (same shape as CWE-327 / CWE-89 / CWE-676): the
+# presence of a call to an unsafe deserialiser is the finding. No data flow —
+# the call site is where attacker-controlled bytes get reconstructed into an
+# in-memory object graph.
+
+def pymarshal_vuln_session() -> FakeR2Session:
+    """A single PyMarshal_ReadObjectFromString() call (Python marshal)."""
+    imports = [Import(name="PyMarshal_ReadObjectFromString", plt=0x401040)]
+    xrefs = {
+        0x401040: [
+            Xref(
+                0x401160,
+                "CALL",
+                "load_state",
+                "call sym.imp.PyMarshal_ReadObjectFromString",
+            )
+        ]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def php_unserialize_vuln_session() -> FakeR2Session:
+    """A single php_unserialize() call (PHP POP-chain sink)."""
+    imports = [Import(name="php_unserialize", plt=0x401050)]
+    xrefs = {
+        0x401050: [Xref(0x401172, "CALL", "read_session", "call sym.imp.php_unserialize")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def unserialize_vuln_session() -> FakeR2Session:
+    """A single unserialize() call (generic deserialise sink)."""
+    imports = [Import(name="unserialize", plt=0x401055)]
+    xrefs = {
+        0x401055: [Xref(0x401178, "CALL", "restore_blob", "call sym.imp.unserialize")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def yaml_load_vuln_session() -> FakeR2Session:
+    """A single yaml_load() call (default-tag loader)."""
+    imports = [Import(name="yaml_load", plt=0x401060)]
+    xrefs = {
+        0x401060: [Xref(0x401184, "CALL", "parse_config", "call sym.imp.yaml_load")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cbor_load_vuln_session() -> FakeR2Session:
+    """A single cbor_load() call (MEDIUM — schema-less tree decoder)."""
+    imports = [Import(name="cbor_load", plt=0x401070)]
+    xrefs = {
+        0x401070: [Xref(0x401196, "CALL", "decode_msg", "call sym.imp.cbor_load")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def msgpack_unpack_vuln_session() -> FakeR2Session:
+    """A single msgpack_unpack() call (MEDIUM — schema-less tree decoder)."""
+    imports = [Import(name="msgpack_unpack", plt=0x401080)]
+    xrefs = {
+        0x401080: [Xref(0x4011a8, "CALL", "decode_frame", "call sym.imp.msgpack_unpack")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def protobuf_unpack_vuln_session() -> FakeR2Session:
+    """A single protobuf_c_message_unpack() call (MEDIUM)."""
+    imports = [Import(name="protobuf_c_message_unpack", plt=0x401090)]
+    xrefs = {
+        0x401090: [
+            Xref(
+                0x4011ba,
+                "CALL",
+                "decode_req",
+                "call sym.imp.protobuf_c_message_unpack",
+            )
+        ]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def xdr_pointer_vuln_session() -> FakeR2Session:
+    """A single xdr_pointer() call (MEDIUM — XDR pointer chain decode)."""
+    imports = [Import(name="xdr_pointer", plt=0x4010a0)]
+    xrefs = {
+        0x4010a0: [Xref(0x4011cc, "CALL", "decode_tree", "call sym.imp.xdr_pointer")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe502_all_session() -> FakeR2Session:
+    """One call to each of seven representative CWE-502 routines.
+
+    Includes a safe neighbour (``yaml_safe_load``) that must NOT fire.
+    """
+    imports = [
+        Import(name="PyMarshal_ReadObjectFromString", plt=0x401040),
+        Import(name="php_unserialize", plt=0x401050),
+        Import(name="yaml_load", plt=0x401060),
+        Import(name="cbor_load", plt=0x401070),
+        Import(name="msgpack_unpack", plt=0x401080),
+        Import(name="protobuf_c_message_unpack", plt=0x401090),
+        Import(name="xdr_pointer", plt=0x4010a0),
+        Import(name="yaml_safe_load", plt=0x4010b0),  # safe API, must not fire
+    ]
+    xrefs = {
+        0x401040: [
+            Xref(
+                0x401160,
+                "CALL",
+                "load_state",
+                "call sym.imp.PyMarshal_ReadObjectFromString",
+            )
+        ],
+        0x401050: [
+            Xref(0x401172, "CALL", "read_session", "call sym.imp.php_unserialize")
+        ],
+        0x401060: [
+            Xref(0x401184, "CALL", "parse_config", "call sym.imp.yaml_load")
+        ],
+        0x401070: [Xref(0x401196, "CALL", "decode_msg", "call sym.imp.cbor_load")],
+        0x401080: [
+            Xref(0x4011a8, "CALL", "decode_frame", "call sym.imp.msgpack_unpack")
+        ],
+        0x401090: [
+            Xref(
+                0x4011ba,
+                "CALL",
+                "decode_req",
+                "call sym.imp.protobuf_c_message_unpack",
+            )
+        ],
+        0x4010a0: [
+            Xref(0x4011cc, "CALL", "decode_tree", "call sym.imp.xdr_pointer")
+        ],
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe502_clean_session() -> FakeR2Session:
+    """Only safe parsers / safe loaders imported — no CWE-502 sink present."""
+    imports = [
+        Import(name="yaml_safe_load", plt=0x401040),
+        Import(name="json_decode", plt=0x401050),
+        Import(name="cbor_stream_decode", plt=0x401060),
+        Import(name="protobuf_c_message_unpack_to_buffer", plt=0x401070),
+    ]
+    return FakeR2Session(imports, xrefs={})

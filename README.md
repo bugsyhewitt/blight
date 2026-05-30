@@ -138,8 +138,8 @@ is, not how severe the bug would be if exploited:
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-330 (parsed predictable seed — clock/pid return or small constant immediate), CWE-426, CWE-676 (HIGH-severity symbols), CWE-732 (parsed constant world-writable mode), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
 | `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-131 (an allocator's size argument traces back to a strlen-family return with no +1 adjustment in the in-function view but reachability of the allocation along that strlen path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-191 (a size argument is produced by an unguarded subtraction but whether the operands actually underflow at runtime is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
-| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-330 (parsed predictable seed — clock/pid return or small constant immediate), CWE-377 (HIGH-severity symbols — `tempnam`/`tmpnam_r`), CWE-426, CWE-676 (HIGH-severity symbols), CWE-732 (parsed constant world-writable mode), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
-| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-377 (MEDIUM-severity symbols — `tmpfile`/`tmpfile64`), CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
+| `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-330 (parsed predictable seed — clock/pid return or small constant immediate), CWE-377 (HIGH-severity symbols — `tempnam`/`tmpnam_r`), CWE-426, CWE-502 (HIGH-severity symbols — Python marshal / PHP unserialize / default-tag yaml_load), CWE-676 (HIGH-severity symbols), CWE-732 (parsed constant world-writable mode), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
+| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-377 (MEDIUM-severity symbols — `tmpfile`/`tmpfile64`), CWE-502 (MEDIUM-severity symbols — schema-less tree decoders cbor/msgpack/bson/protobuf-c/xdr), CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
 | `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-191 (a size argument is produced by an unguarded subtraction but whether the operands actually underflow at runtime is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
@@ -312,7 +312,7 @@ in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-131, CWE-134, CWE-191, CWE-197,
 CWE-252, CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416,
 in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-191, CWE-197, CWE-250,
 CWE-252, CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-377, CWE-401, CWE-415,
-CWE-416, CWE-426, CWE-476, CWE-676, CWE-732, and CWE-798 were added post-v0.1
+CWE-416, CWE-426, CWE-476, CWE-502, CWE-676, CWE-732, and CWE-798 were added post-v0.1
 (see [POST_V01.md](POST_V01.md)).
 
 ### CWE-22 — Path Traversal
@@ -1378,6 +1378,63 @@ $ blight --binary path/to/elf --checks 252 --format json
       "evidence": "return value of setuid is ignored (unchecked return value — failure goes undetected)",
       "symbol": "setuid",
       "confidence": "low"
+    }
+  ]
+}
+```
+
+### CWE-502 — Deserialization of Untrusted Data
+
+Calls to library routines that materialise an in-memory object graph from a
+serialised byte stream where that stream is the attack surface. The
+deserialiser happily builds whatever the bytes describe — type-confused
+objects, oversized allocations, gadget chains for libraries that resolve type
+tags into class instantiations, or, in the Python and PHP cases, executable
+code paths whose mere reconstruction runs attacker logic. The call site is
+the exact spot a reviewer must inspect for an enforced trust boundary on the
+input bytes.
+
+This is a pure PLT-lookup check (the same shape as CWE-89, CWE-327, CWE-295
+and CWE-676): it does **not** read the input argument out of the disassembly
+— the *presence of the call itself* is the finding. A reviewer follows up at
+the flagged address to confirm whether the bytes can be attacker-influenced.
+
+Covered families (severity HIGH unless noted):
+
+* **Python embedded interpreter** — `PyMarshal_ReadObjectFromString`,
+  `PyMarshal_ReadObjectFromFile`, `PyMarshal_ReadLastObjectFromFile`. Marshal
+  reconstructs arbitrary objects including code objects.
+* **PHP unserialize sinks** — `php_unserialize`, `php_var_unserialize`,
+  `unserialize`. Type-tag-driven object instantiation is the classic
+  POP-chain entry point.
+* **libyaml default-tag loaders** — `yaml_parser_load`, `yaml_load`,
+  `yaml_load_file`. With default tag resolution, custom-type tags trigger
+  attacker-chosen constructors; use the safe loader.
+* **Schema-less tree decoders (MEDIUM)** — `cbor_load`, `msgpack_unpack`,
+  `msgpack_unpack_next`, `bson_init_from_json`. Attacker controls allocation
+  sizing, nesting depth, and tag dispatch.
+* **Generic protobuf / XDR decoders (MEDIUM)** — `protobuf_c_message_unpack`
+  (no length cap / attacker-chosen descriptor); `xdr_pointer`,
+  `xdr_reference` (follow XDR-encoded pointer chains during decode).
+
+Confidence mirrors severity (HIGH→`high`, MEDIUM→`medium`) — the PLT match is
+certain, the label expresses how strongly the call warrants action. Safer
+neighbours (`yaml_safe_load`, `json_decode`, streaming/iterator decoders with
+a pinned schema) are intentionally *not* flagged.
+
+```bash
+$ blight --binary tests/fixtures/deserial-vuln --checks 502 --format json
+{
+  "binary": "tests/fixtures/deserial-vuln",
+  "checks": [502],
+  "findings": [
+    {
+      "cwe": 502,
+      "function": "load_state",
+      "address": "0x401160",
+      "evidence": "[HIGH] call to PyMarshal_ReadObjectFromString: Use of Python marshal deserialiser; reconstructs arbitrary objects including code objects — use a parsed wire format (JSON) instead",
+      "symbol": "PyMarshal_ReadObjectFromString",
+      "confidence": "high"
     }
   ]
 }
