@@ -3473,3 +3473,97 @@ def cwe131_wcslen_no_plus_one_vuln_session() -> FakeR2Session:
         Instruction(0x401166, "ret"),
     ]
     return FakeR2Session(imports, xrefs, {0x401130: ops})
+# --- CWE-377 insecure-temporary-file fixtures ------------------------------
+
+# Pure PLT-lookup detector (same shape as CWE-22 / CWE-89 / CWE-119 / CWE-295 /
+# CWE-327 / CWE-362 / CWE-426 / CWE-676 / CWE-732): the presence of a call to a
+# temp-file primitive that is unsafe by construction is itself the finding —
+# no argument inspection is needed because the weakness is intrinsic to the
+# routine (predictable name + non-atomic creation step).
+
+def tempnam_vuln_session() -> FakeR2Session:
+    """A single tempnam() call — HIGH (predictable name → TOCTOU on open)."""
+    imports = [Import(name="tempnam", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "build_path", "call sym.imp.tempnam")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def tmpnam_r_vuln_session() -> FakeR2Session:
+    """A single tmpnam_r() call — HIGH (reentrant sibling of tmpnam, same race)."""
+    imports = [Import(name="tmpnam_r", plt=0x401050)]
+    xrefs = {
+        0x401050: [Xref(0x401172, "CALL", "name_temp", "call sym.imp.tmpnam_r")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def tmpfile_vuln_session() -> FakeR2Session:
+    """A single tmpfile() call — MEDIUM (libc-internal name fallback)."""
+    imports = [Import(name="tmpfile", plt=0x401060)]
+    xrefs = {
+        0x401060: [Xref(0x401184, "CALL", "open_scratch", "call sym.imp.tmpfile")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def tmpfile64_vuln_session() -> FakeR2Session:
+    """A single tmpfile64() call — MEDIUM (64-bit sibling of tmpfile)."""
+    imports = [Import(name="tmpfile64", plt=0x401070)]
+    xrefs = {
+        0x401070: [Xref(0x401196, "CALL", "large_scratch", "call sym.imp.tmpfile64")]
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe377_all_session() -> FakeR2Session:
+    """All four CWE-377 functions, each called once in a distinct function."""
+    imports = [
+        Import(name="tempnam", plt=0x401040),
+        Import(name="tmpnam_r", plt=0x401050),
+        Import(name="tmpfile", plt=0x401060),
+        Import(name="tmpfile64", plt=0x401070),
+        # Benign neighbours that must NOT be flagged.
+        Import(name="mkstemp", plt=0x401080),
+        Import(name="mkostemp", plt=0x401090),
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "build_path", "call sym.imp.tempnam")],
+        0x401050: [Xref(0x401172, "CALL", "name_temp", "call sym.imp.tmpnam_r")],
+        0x401060: [Xref(0x401184, "CALL", "open_scratch", "call sym.imp.tmpfile")],
+        0x401070: [Xref(0x401196, "CALL", "large_scratch", "call sym.imp.tmpfile64")],
+        0x401080: [Xref(0x4011a8, "CALL", "open_safe", "call sym.imp.mkstemp")],
+        0x401090: [Xref(0x4011ba, "CALL", "open_safe2", "call sym.imp.mkostemp")],
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe377_clean_session() -> FakeR2Session:
+    """Only the safe replacements imported — nothing for CWE-377 to anchor on."""
+    imports = [
+        Import(name="mkstemp", plt=0x401040),
+        Import(name="mkostemp", plt=0x401050),
+        Import(name="mkstemps", plt=0x401060),
+        Import(name="mkostemps", plt=0x401070),
+        Import(name="mkdtemp", plt=0x401080),
+        Import(name="open", plt=0x401090),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
+def cwe377_does_not_overlap_cwe676_session() -> FakeR2Session:
+    """A binary with both tmpnam (CWE-676) and tempnam (CWE-377).
+
+    Confirms the two detectors are complementary and do not double-flag the
+    same call site — CWE-377 owns tempnam, CWE-676 owns tmpnam.
+    """
+    imports = [
+        Import(name="tmpnam", plt=0x401040),    # CWE-676 territory
+        Import(name="tempnam", plt=0x401050),   # CWE-377 territory
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "legacy_name", "call sym.imp.tmpnam")],
+        0x401050: [Xref(0x401172, "CALL", "modern_name", "call sym.imp.tempnam")],
+    }
+    return FakeR2Session(imports, xrefs)
