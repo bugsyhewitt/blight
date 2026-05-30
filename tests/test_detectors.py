@@ -27,6 +27,7 @@ from blight.detectors import (
     cwe416,
     cwe426,
     cwe476,
+    cwe502,
     cwe676,
     cwe732,
     cwe798,
@@ -259,6 +260,16 @@ from tests.fake_session import (
     cwe250_arm64_setuid_zero_vuln_session,
     cwe250_arm64_setuid_nonzero_safe_session,
     cwe250_multi_call_session,
+    pymarshal_vuln_session,
+    php_unserialize_vuln_session,
+    unserialize_vuln_session,
+    yaml_load_vuln_session,
+    cbor_load_vuln_session,
+    msgpack_unpack_vuln_session,
+    protobuf_unpack_vuln_session,
+    xdr_pointer_vuln_session,
+    cwe502_all_session,
+    cwe502_clean_session,
 )
 
 
@@ -2205,3 +2216,114 @@ class TestCwe250:
         f = findings[0]
         assert f.function == "vuln_priv"
         assert f.symbol == "setuid"
+
+
+class TestCwe502:
+    def test_flags_pymarshal(self) -> None:
+        findings = cwe502.detect(pymarshal_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 502
+        assert f.symbol == "PyMarshal_ReadObjectFromString"
+        assert f.function == "load_state"
+        assert f.address == hex(0x401160)
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "marshal" in f.evidence
+
+    def test_flags_php_unserialize(self) -> None:
+        findings = cwe502.detect(php_unserialize_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 502
+        assert f.symbol == "php_unserialize"
+        assert f.function == "read_session"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "POP-chain" in f.evidence
+
+    def test_flags_unserialize(self) -> None:
+        findings = cwe502.detect(unserialize_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 502
+        assert f.symbol == "unserialize"
+        assert f.function == "restore_blob"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_yaml_load(self) -> None:
+        findings = cwe502.detect(yaml_load_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 502
+        assert f.symbol == "yaml_load"
+        assert f.function == "parse_config"
+        assert "HIGH" in f.evidence
+        assert f.confidence == "high"
+        assert "yaml_safe_load" in f.evidence
+
+    def test_flags_cbor_load_medium(self) -> None:
+        findings = cwe502.detect(cbor_load_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 502
+        assert f.symbol == "cbor_load"
+        assert f.function == "decode_msg"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_msgpack_unpack_medium(self) -> None:
+        findings = cwe502.detect(msgpack_unpack_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 502
+        assert f.symbol == "msgpack_unpack"
+        assert f.function == "decode_frame"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_protobuf_unpack_medium(self) -> None:
+        findings = cwe502.detect(protobuf_unpack_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 502
+        assert f.symbol == "protobuf_c_message_unpack"
+        assert f.function == "decode_req"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_xdr_pointer_medium(self) -> None:
+        findings = cwe502.detect(xdr_pointer_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 502
+        assert f.symbol == "xdr_pointer"
+        assert f.function == "decode_tree"
+        assert "MEDIUM" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_all_representative_routines(self) -> None:
+        findings = cwe502.detect(cwe502_all_session())
+        symbols = {f.symbol for f in findings}
+        assert symbols == {
+            "PyMarshal_ReadObjectFromString",
+            "php_unserialize",
+            "yaml_load",
+            "cbor_load",
+            "msgpack_unpack",
+            "protobuf_c_message_unpack",
+            "xdr_pointer",
+        }
+        for f in findings:
+            assert f.cwe == 502
+            assert f.function
+            assert f.address.startswith("0x")
+            assert f.evidence
+            assert f.confidence in ("high", "medium", "low")
+
+    def test_clean_session_no_findings(self) -> None:
+        assert cwe502.detect(cwe502_clean_session()) == []
+
+    def test_does_not_flag_absent_routine(self) -> None:
+        assert cwe502.detect(clean_baseline_session()) == []
