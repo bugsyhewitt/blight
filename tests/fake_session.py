@@ -3567,3 +3567,262 @@ def cwe377_does_not_overlap_cwe676_session() -> FakeR2Session:
         0x401050: [Xref(0x401172, "CALL", "modern_name", "call sym.imp.tempnam")],
     }
     return FakeR2Session(imports, xrefs)
+
+
+# --- CWE-250 execution-with-unnecessary-privileges fixtures ----------------
+#
+# Pattern: a setuid/setgid family call whose id arguments are all literal 0,
+# which means the program is asking to run as root. Single-arg members flag
+# when arg0 is 0; the two-arg setreuid/setregid and three-arg setresuid/
+# setresgid forms require every id argument to be literal 0 (so the
+# leave-unchanged sentinel -1 in setreuid(-1, 0) does NOT trigger).
+
+def cwe250_setuid_zero_vuln_session() -> FakeR2Session:
+    """x86_64: setuid(0) — explicit re-escalation to root (vulnerable)."""
+    imports = [Import(name="setuid", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "become_root", "call sym.imp.setuid")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0x0"),              # uid = 0
+        Instruction(0x401160, "call sym.imp.setuid"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe250_setuid_zero_via_xor_session() -> FakeR2Session:
+    """x86_64: setuid(0) emitted as ``xor edi, edi`` — the compiler's preferred
+    zeroing idiom. Must be recognised as a literal 0.
+    """
+    imports = [Import(name="setuid", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "become_root", "call sym.imp.setuid")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "xor edi, edi"),              # uid = 0
+        Instruction(0x401160, "call sym.imp.setuid"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe250_seteuid_zero_vuln_session() -> FakeR2Session:
+    """x86_64: seteuid(0) — effective uid re-escalated to root."""
+    imports = [Import(name="seteuid", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "go_root", "call sym.imp.seteuid")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0x0"),
+        Instruction(0x401160, "call sym.imp.seteuid"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe250_setgid_zero_vuln_session() -> FakeR2Session:
+    """x86_64: setgid(0) — root-group escalation."""
+    imports = [Import(name="setgid", plt=0x401040)]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "become_root", "call sym.imp.setgid")]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0x0"),
+        Instruction(0x401160, "call sym.imp.setgid"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe250_setresuid_all_zero_vuln_session() -> FakeR2Session:
+    """x86_64: setresuid(0, 0, 0) — every id argument is root (vulnerable)."""
+    imports = [Import(name="setresuid", plt=0x401040)]
+    xrefs = {
+        0x401040: [
+            Xref(0x401160, "CALL", "full_root", "call sym.imp.setresuid")
+        ]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0x0"),              # ruid = 0
+        Instruction(0x401148, "mov esi, 0x0"),              # euid = 0
+        Instruction(0x401150, "mov edx, 0x0"),              # suid = 0
+        Instruction(0x401160, "call sym.imp.setresuid"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe250_setreuid_neg1_zero_safe_session() -> FakeR2Session:
+    """x86_64: setreuid(-1, 0) — the leave-real-unchanged idiom. The first arg
+    is -1 (0xffffffff), so the precision-first detector must NOT flag — it only
+    fires when *every* id arg is provably zero.
+    """
+    imports = [Import(name="setreuid", plt=0x401040)]
+    xrefs = {
+        0x401040: [
+            Xref(0x401160, "CALL", "partial_root", "call sym.imp.setreuid")
+        ]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0xffffffff"),       # ruid = -1
+        Instruction(0x401148, "mov esi, 0x0"),              # euid = 0
+        Instruction(0x401160, "call sym.imp.setreuid"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe250_setreuid_zero_zero_vuln_session() -> FakeR2Session:
+    """x86_64: setreuid(0, 0) — both arguments literal 0 (vulnerable)."""
+    imports = [Import(name="setreuid", plt=0x401040)]
+    xrefs = {
+        0x401040: [
+            Xref(0x401160, "CALL", "full_root", "call sym.imp.setreuid")
+        ]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0x0"),
+        Instruction(0x401148, "mov esi, 0x0"),
+        Instruction(0x401160, "call sym.imp.setreuid"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe250_setuid_nonzero_safe_session() -> FakeR2Session:
+    """x86_64: setuid(65534) — drop to the nobody user (typical safe pattern).
+    A non-zero literal id must NOT flag.
+    """
+    imports = [Import(name="setuid", plt=0x401040)]
+    xrefs = {
+        0x401040: [
+            Xref(0x401160, "CALL", "drop_priv", "call sym.imp.setuid")
+        ]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0xfffe"),           # uid = 65534
+        Instruction(0x401160, "call sym.imp.setuid"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe250_setuid_nonconstant_session() -> FakeR2Session:
+    """x86_64: setuid(uid_from_var) — uid is a register move, not a bare
+    immediate. The precision-first detector must NOT flag a non-constant id.
+    """
+    imports = [Import(name="setuid", plt=0x401040)]
+    xrefs = {
+        0x401040: [
+            Xref(0x401160, "CALL", "apply_uid", "call sym.imp.setuid")
+        ]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, eax"),              # uid from a var
+        Instruction(0x401160, "call sym.imp.setuid"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe250_setresuid_mixed_safe_session() -> FakeR2Session:
+    """x86_64: setresuid(0, 1000, -1) — only the real uid is asked to be 0,
+    the effective uid is 1000 and the saved uid is left unchanged. NOT
+    flagged: every id arg must be literal 0 to fire.
+    """
+    imports = [Import(name="setresuid", plt=0x401040)]
+    xrefs = {
+        0x401040: [
+            Xref(0x401160, "CALL", "partial", "call sym.imp.setresuid")
+        ]
+    }
+    ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x401140, "mov edi, 0x0"),
+        Instruction(0x401148, "mov esi, 0x3e8"),            # 1000
+        Instruction(0x401150, "mov edx, 0xffffffff"),       # -1
+        Instruction(0x401160, "call sym.imp.setresuid"),
+        Instruction(0x401165, "leave"),
+        Instruction(0x401166, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: ops})
+
+
+def cwe250_clean_session() -> FakeR2Session:
+    """No privilege-setting imports — nothing for CWE-250 to anchor on."""
+    imports = [
+        Import(name="puts", plt=0x401030),
+        Import(name="strlen", plt=0x401040),
+    ]
+    return FakeR2Session(imports, xrefs={})
+
+
+def cwe250_arm64_setuid_zero_vuln_session() -> FakeR2Session:
+    """AArch64: setuid(0) — uid in w0, literal zero via ``mov w0, 0``."""
+    imports = [Import(name="setuid", plt=0x710)]
+    xrefs = {0x710: [Xref(0x840, "CALL", "become_root", "bl sym.imp.setuid")]}
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x834, "mov w0, 0x0"),                  # uid = 0
+        Instruction(0x840, "bl sym.imp.setuid"),
+        Instruction(0x844, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x848, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe250_arm64_setuid_nonzero_safe_session() -> FakeR2Session:
+    """AArch64: setuid(1000) — safe drop. Must NOT flag."""
+    imports = [Import(name="setuid", plt=0x710)]
+    xrefs = {0x710: [Xref(0x840, "CALL", "drop_priv", "bl sym.imp.setuid")]}
+    ops = [
+        Instruction(0x830, "stp x29, x30, [sp, -0x20]!"),
+        Instruction(0x834, "mov w0, 0x3e8"),                # 1000
+        Instruction(0x840, "bl sym.imp.setuid"),
+        Instruction(0x844, "ldp x29, x30, [sp], 0x20"),
+        Instruction(0x848, "ret"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x830: ops}, arch="arm64")
+
+
+def cwe250_multi_call_session() -> FakeR2Session:
+    """Two setuid sites in one binary: setuid(0) flags, setuid(65534) skips."""
+    imports = [Import(name="setuid", plt=0x401040)]
+    xrefs = {
+        0x401040: [
+            Xref(0x401160, "CALL", "vuln_priv", "call sym.imp.setuid"),
+            Xref(0x401260, "CALL", "safe_priv", "call sym.imp.setuid"),
+        ]
+    }
+    vuln_ops = [
+        Instruction(0x401140, "mov edi, 0x0"),
+        Instruction(0x401160, "call sym.imp.setuid"),
+        Instruction(0x401165, "ret"),
+    ]
+    safe_ops = [
+        Instruction(0x401240, "mov edi, 0xfffe"),
+        Instruction(0x401260, "call sym.imp.setuid"),
+        Instruction(0x401265, "ret"),
+    ]
+    return FakeR2Session(
+        imports, xrefs, {0x401140: vuln_ops, 0x401240: safe_ops}
+    )

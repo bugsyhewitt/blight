@@ -54,6 +54,7 @@ _CWE_META: dict[int, tuple[str, str]] = {
     134: ("Uncontrolled Format String", "error"),
     197: ("Numeric Truncation Error", "warning"),
     242: ("Use of Inherently Dangerous Function", "warning"),
+    250: ("Execution with Unnecessary Privileges", "error"),
     295: ("Improper Certificate Validation", "error"),
     327: ("Use of a Broken or Risky Cryptographic Algorithm", "error"),
     330: ("Use of Insufficiently Random Values", "error"),

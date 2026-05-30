@@ -14,6 +14,7 @@ from blight.detectors import (
     cwe191,
     cwe197,
     cwe242,
+    cwe250,
     cwe252,
     cwe295,
     cwe327,
@@ -244,6 +245,20 @@ from tests.fake_session import (
     cwe377_all_session,
     cwe377_clean_session,
     cwe377_does_not_overlap_cwe676_session,
+    cwe250_setuid_zero_vuln_session,
+    cwe250_setuid_zero_via_xor_session,
+    cwe250_seteuid_zero_vuln_session,
+    cwe250_setgid_zero_vuln_session,
+    cwe250_setresuid_all_zero_vuln_session,
+    cwe250_setreuid_neg1_zero_safe_session,
+    cwe250_setreuid_zero_zero_vuln_session,
+    cwe250_setuid_nonzero_safe_session,
+    cwe250_setuid_nonconstant_session,
+    cwe250_setresuid_mixed_safe_session,
+    cwe250_clean_session,
+    cwe250_arm64_setuid_zero_vuln_session,
+    cwe250_arm64_setuid_nonzero_safe_session,
+    cwe250_multi_call_session,
 )
 
 
@@ -2103,3 +2118,90 @@ class TestCwe377:
         assert "tempnam" not in flagged
         # And CWE-676 still picks up tmpnam as expected.
         assert "tmpnam" in flagged
+
+
+class TestCwe250:
+    def test_flags_setuid_zero(self) -> None:
+        findings = cwe250.detect(cwe250_setuid_zero_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 250
+        assert f.symbol == "setuid"
+        assert f.function == "become_root"
+        assert f.address == hex(0x401160)
+        assert "HIGH" in f.evidence
+        assert "root" in f.evidence
+        assert f.confidence == "high"
+
+    def test_flags_setuid_zero_via_xor_idiom(self) -> None:
+        # `xor edi, edi` is the compiler's preferred zeroing form for the uid.
+        findings = cwe250.detect(cwe250_setuid_zero_via_xor_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "setuid"
+        assert f.confidence == "high"
+
+    def test_flags_seteuid_zero(self) -> None:
+        findings = cwe250.detect(cwe250_seteuid_zero_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "seteuid"
+
+    def test_flags_setgid_zero(self) -> None:
+        findings = cwe250.detect(cwe250_setgid_zero_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "setgid"
+
+    def test_flags_setresuid_all_zero(self) -> None:
+        findings = cwe250.detect(cwe250_setresuid_all_zero_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "setresuid"
+        assert "3" in f.evidence  # "all 3 uid/gid arguments are literal 0"
+
+    def test_flags_setreuid_zero_zero(self) -> None:
+        findings = cwe250.detect(cwe250_setreuid_zero_zero_vuln_session())
+        assert len(findings) == 1
+        assert findings[0].symbol == "setreuid"
+
+    def test_does_not_flag_setreuid_neg1_zero(self) -> None:
+        # setreuid(-1, 0) is the leave-real-unchanged idiom. At least one id
+        # is not literal 0, so the precision-first detector stays quiet.
+        assert cwe250.detect(cwe250_setreuid_neg1_zero_safe_session()) == []
+
+    def test_does_not_flag_setuid_nonzero(self) -> None:
+        # setuid(65534) — drop to nobody. A non-zero literal id is the *safe*
+        # pattern and must NOT flag.
+        assert cwe250.detect(cwe250_setuid_nonzero_safe_session()) == []
+
+    def test_does_not_flag_nonconstant_id(self) -> None:
+        # uid comes from a register move (`mov edi, eax`) — precision-first
+        # detector stays quiet on non-constant ids.
+        assert cwe250.detect(cwe250_setuid_nonconstant_session()) == []
+
+    def test_does_not_flag_setresuid_mixed(self) -> None:
+        # setresuid(0, 1000, -1) — only the real uid is 0. Must NOT flag.
+        assert cwe250.detect(cwe250_setresuid_mixed_safe_session()) == []
+
+    def test_clean_session_no_findings(self) -> None:
+        assert cwe250.detect(cwe250_clean_session()) == []
+
+    def test_does_not_flag_when_no_setuid_imported(self) -> None:
+        assert cwe250.detect(clean_baseline_session()) == []
+
+    def test_arm64_flags_setuid_zero(self) -> None:
+        findings = cwe250.detect(cwe250_arm64_setuid_zero_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.symbol == "setuid"
+        assert f.address == hex(0x840)
+        assert f.confidence == "high"
+
+    def test_arm64_does_not_flag_nonzero(self) -> None:
+        assert cwe250.detect(cwe250_arm64_setuid_nonzero_safe_session()) == []
+
+    def test_multi_call_only_flags_zero(self) -> None:
+        findings = cwe250.detect(cwe250_multi_call_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.function == "vuln_priv"
+        assert f.symbol == "setuid"
