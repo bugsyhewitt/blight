@@ -388,12 +388,20 @@ architecture radare2 can disassemble.
 
 ### CWE-78 — OS Command Injection
 
-Calls to `system()` and the `exec*()` family **where the command argument is
-not a constant string literal**. A constant command such as `system("ls")` is
-not flagged; a command built from a buffer or variable is. The argument-register
+Calls to `system()`, `popen()`, and the `exec*()` family **where the command
+argument is not a constant string literal**.  A constant command such as
+`system("ls")` is not flagged; a command built from a buffer or variable is.
+`popen(cmd, mode)` is included because it passes `cmd` verbatim to `/bin/sh -c`
+— the same shell-injection surface as `system(cmd)`.  The argument-register
 convention is resolved per architecture (see
 [Architecture support](#architecture-support)), so this works on x86_64 and
 AArch64.
+
+> **Relationship to CWE-426:** CWE-426 also flags `popen` — but for a
+> *different* reason (it resolves the program name via `$PATH`, enabling PATH
+> hijacking even with a constant command).  The two findings are complementary:
+> CWE-426 fires on any `popen` call; CWE-78 fires only when the command is
+> non-constant and therefore potentially attacker-influenced.
 
 ```bash
 $ blight --binary tests/fixtures/system-vuln --checks 78 --format json

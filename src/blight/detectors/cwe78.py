@@ -1,9 +1,16 @@
 """CWE-78: OS Command Injection.
 
-Flags calls to ``system`` and the ``exec*`` family where the command argument
-is NOT a constant string literal. A constant command (e.g. ``system("ls")``)
-is uninteresting; a command built from a buffer or variable is the injection
-risk.
+Flags calls to ``system``, ``popen``, and the ``exec*`` family where the
+command argument is NOT a constant string literal.  A constant command
+(e.g. ``system("ls")``) is uninteresting; a command built from a buffer or
+variable is the injection risk.
+
+``popen(cmd, mode)`` is included because it passes ``cmd`` verbatim to
+``/bin/sh -c`` — the same shell injection surface as ``system(cmd)``.  It is
+complementary to the CWE-426 ``popen`` finding (which flags the PATH-search
+risk for the *program* name in the command string) rather than overlapping
+with it: CWE-426 fires even when the command is a literal; CWE-78 fires only
+when the command is non-constant and therefore potentially attacker-influenced.
 
 Heuristic: inspect the instructions in the containing function up to the call
 site. The first argument is passed in an architecture-specific register
@@ -32,8 +39,10 @@ from ._common import call_sites
 
 CWE = 78
 
-# system + the exec* family.
-DANGEROUS = ("system", "execl", "execlp", "execle", "execv", "execvp", "execvpe")
+# system + popen + the exec* family.
+# popen(cmd, mode) passes cmd to /bin/sh -c, the same injection surface as
+# system(cmd).  Its command is always argument 0, matching _ARG_INDEX = 0.
+DANGEROUS = ("system", "popen", "execl", "execlp", "execle", "execv", "execvp", "execvpe")
 
 # All these functions take the command/program as their FIRST argument.
 _ARG_INDEX = 0

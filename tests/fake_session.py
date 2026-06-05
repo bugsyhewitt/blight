@@ -129,6 +129,52 @@ def system_constant_session() -> FakeR2Session:
     return FakeR2Session(imports, xrefs, {0x401136: main_ops})
 
 
+def popen_injection_vuln_session() -> FakeR2Session:
+    """popen with a non-constant command argument (rdi loaded from stack buffer).
+
+    Scenario: the caller builds a command string with snprintf then passes the
+    stack buffer directly to popen — classic shell injection via popen().
+    """
+    imports = [
+        Import(name="popen", plt=0x401030),
+        Import(name="snprintf", plt=0x401040),
+    ]
+    xrefs = {
+        0x401030: [Xref(0x4011b0, "CALL", "open_proc", "call sym.imp.popen")],
+    }
+    # open_proc: builds command in a stack buffer, loads it into rdi, then
+    # calls popen(rdi, "r").
+    open_proc_ops = [
+        Instruction(0x401180, "push rbp"),
+        Instruction(0x401185, "mov rbp, rsp"),
+        Instruction(0x401188, "sub rsp, 0x110"),
+        Instruction(0x401190, "mov rdx, qword [rbp - 0x108]"),   # user arg
+        Instruction(0x401198, "lea rsi, str.cat__s"),
+        Instruction(0x4011a0, "lea rax, [rbp - 0x100]"),
+        Instruction(0x4011a5, "mov rdi, rax"),                   # non-constant rdi
+        Instruction(0x4011a8, "call sym.imp.snprintf"),
+        Instruction(0x4011ad, "lea rax, [rbp - 0x100]"),
+        Instruction(0x4011b2, "mov rdi, rax"),                   # non-constant rdi
+        Instruction(0x4011b0, "call sym.imp.popen"),
+        Instruction(0x4011b5, "leave"),
+    ]
+    functions = {0x401180: open_proc_ops}
+    return FakeR2Session(imports, xrefs, functions)
+
+
+def popen_injection_constant_session() -> FakeR2Session:
+    """popen("cat /etc/os-release", \"r\") — constant command, must NOT be flagged."""
+    imports = [Import(name="popen", plt=0x401030)]
+    xrefs = {0x401030: [Xref(0x40113f, "CALL", "main", "call sym.imp.popen")]}
+    main_ops = [
+        Instruction(0x401136, "push rbp"),
+        Instruction(0x40113a, "lea rdi, str.cat__etc_os_release"),
+        Instruction(0x40113f, "call sym.imp.popen"),
+        Instruction(0x401144, "leave"),
+    ]
+    return FakeR2Session(imports, xrefs, {0x401136: main_ops})
+
+
 def gets_vuln_session() -> FakeR2Session:
     """gets-vuln: a single gets() call in main."""
     imports = [
