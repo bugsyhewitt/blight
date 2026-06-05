@@ -36,6 +36,7 @@ def test_checks_choices() -> None:
 
 def test_resolve_all() -> None:
     assert cli._resolve_checks("all") == [
+        20,
         22,
         78,
         89,

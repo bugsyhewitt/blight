@@ -5,6 +5,7 @@ security extensions. Each unique CWE becomes a rule; each Finding becomes
 a result referencing that rule.
 
 Severity mapping (no severity field on Finding — derived from CWE class):
+  CWE-20  (Improper Input Validation)     → MEDIUM → "warning"
   CWE-22  (Path Traversal)               → HIGH  → "error"
   CWE-78  (OS Command Injection)         → HIGH  → "error"
   CWE-89  (SQL Injection)                → HIGH  → "error"
@@ -13,17 +14,25 @@ Severity mapping (no severity field on Finding — derived from CWE class):
   CWE-122 (Heap-Based Buffer Overflow)   → HIGH  → "error"
   CWE-131 (Incorrect Buffer-Size Calc.)  → HIGH  → "error"
   CWE-134 (Uncontrolled Format String)   → HIGH  → "error"
+  CWE-191 (Integer Underflow)            → HIGH  → "error"
   CWE-197 (Numeric Truncation Error)     → MEDIUM → "warning"
   CWE-242 (Use of Inherently Dangerous)  → MEDIUM → "warning"
+  CWE-250 (Execution w/ Unneeded Privs)  → HIGH  → "error"
+  CWE-252 (Unchecked Return Value)       → MEDIUM → "warning"
   CWE-295 (Improper Certificate Valid.)  → HIGH  → "error"
   CWE-327 (Broken/Risky Cryptography)    → HIGH  → "error"
   CWE-330 (Insufficiently Random Values) → HIGH  → "error"
+  CWE-362 (Race Condition TOCTOU)        → HIGH  → "error"
+  CWE-369 (Divide by Zero)               → MEDIUM → "warning"
   CWE-377 (Insecure Temporary File)      → HIGH  → "error"
-  CWE-401 (Missing Memory Release / Leak)→ HIGH  → "error"
+  CWE-401 (Missing Memory Release / Leak)→ MEDIUM → "warning"
   CWE-415 (Double Free)                  → HIGH  → "error"
   CWE-416 (Use After Free)               → HIGH  → "error"
   CWE-426 (Untrusted Search Path)        → HIGH  → "error"
+  CWE-476 (NULL Pointer Dereference)     → MEDIUM → "warning"
+  CWE-502 (Deserialization of Untrusted) → HIGH  → "error"
   CWE-676 (Use of Potentially Dangerous) → MEDIUM → "warning"
+  CWE-732 (Incorrect Permission Assign.) → HIGH  → "error"
   CWE-798 (Use of Hard-coded Credentials)→ HIGH  → "error"
   unknown                                → "note"
 """
@@ -44,6 +53,7 @@ _INFORMATION_URI = "https://github.com/bugsyhewitt/blight"
 
 # CWE id → (short description, SARIF level)
 _CWE_META: dict[int, tuple[str, str]] = {
+    20:  ("Improper Input Validation", "warning"),
     22:  ("Improper Limitation of a Pathname to a Restricted Directory", "error"),
     78:  ("OS Command Injection", "error"),
     89:  ("SQL Injection", "error"),
@@ -52,17 +62,23 @@ _CWE_META: dict[int, tuple[str, str]] = {
     122: ("Heap-Based Buffer Overflow", "error"),
     131: ("Incorrect Calculation of Buffer Size", "error"),
     134: ("Uncontrolled Format String", "error"),
+    191: ("Integer Underflow (Wrap or Wraparound)", "error"),
     197: ("Numeric Truncation Error", "warning"),
     242: ("Use of Inherently Dangerous Function", "warning"),
     250: ("Execution with Unnecessary Privileges", "error"),
+    252: ("Unchecked Return Value", "warning"),
     295: ("Improper Certificate Validation", "error"),
     327: ("Use of a Broken or Risky Cryptographic Algorithm", "error"),
     330: ("Use of Insufficiently Random Values", "error"),
+    362: ("Concurrent Execution using Shared Resource with Improper Synchronization", "error"),
+    369: ("Divide By Zero", "warning"),
     377: ("Insecure Temporary File", "error"),
-    401: ("Missing Release of Memory after Effective Lifetime", "error"),
+    401: ("Missing Release of Memory after Effective Lifetime", "warning"),
     415: ("Double Free", "error"),
     416: ("Use After Free", "error"),
     426: ("Untrusted Search Path", "error"),
+    476: ("NULL Pointer Dereference", "warning"),
+    502: ("Deserialization of Untrusted Data", "error"),
     676: ("Use of Potentially Dangerous Function", "warning"),
     732: ("Incorrect Permission Assignment for Critical Resource", "error"),
     798: ("Use of Hard-coded Credentials", "error"),

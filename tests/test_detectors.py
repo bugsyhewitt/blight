@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from blight.detectors import (
+    cwe20,
     cwe22,
     cwe78,
     cwe89,
@@ -270,6 +271,13 @@ from tests.fake_session import (
     xdr_pointer_vuln_session,
     cwe502_all_session,
     cwe502_clean_session,
+    atoi_vuln_session,
+    atol_vuln_session,
+    atoll_vuln_session,
+    atof_vuln_session,
+    atoq_vuln_session,
+    cwe20_all_session,
+    cwe20_clean_session,
 )
 
 
@@ -2327,3 +2335,80 @@ class TestCwe502:
 
     def test_does_not_flag_absent_routine(self) -> None:
         assert cwe502.detect(clean_baseline_session()) == []
+
+
+class TestCwe20:
+    def test_flags_atoi(self) -> None:
+        findings = cwe20.detect(atoi_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 20
+        assert f.symbol == "atoi"
+        assert f.function == "parse_port"
+        assert f.address == hex(0x401160)
+        assert "MEDIUM" in f.evidence
+        assert "strtol" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_atol(self) -> None:
+        findings = cwe20.detect(atol_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 20
+        assert f.symbol == "atol"
+        assert f.function == "parse_size"
+        assert "MEDIUM" in f.evidence
+        assert "strtol" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_atoll(self) -> None:
+        findings = cwe20.detect(atoll_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 20
+        assert f.symbol == "atoll"
+        assert f.function == "parse_offset"
+        assert "MEDIUM" in f.evidence
+        assert "strtoll" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_atof(self) -> None:
+        findings = cwe20.detect(atof_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 20
+        assert f.symbol == "atof"
+        assert f.function == "parse_rate"
+        assert "MEDIUM" in f.evidence
+        assert "strtod" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_atoq(self) -> None:
+        findings = cwe20.detect(atoq_vuln_session())
+        assert len(findings) == 1
+        f = findings[0]
+        assert f.cwe == 20
+        assert f.symbol == "atoq"
+        assert f.function == "parse_quota"
+        assert "MEDIUM" in f.evidence
+        assert "strtoll" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_flags_all_five_parsers(self) -> None:
+        findings = cwe20.detect(cwe20_all_session())
+        symbols = {f.symbol for f in findings}
+        assert symbols == {"atoi", "atol", "atoll", "atof", "atoq"}
+        for f in findings:
+            assert f.cwe == 20
+            assert f.function
+            assert f.address.startswith("0x")
+            assert "MEDIUM" in f.evidence
+            assert f.confidence == "medium"
+
+    def test_clean_session_no_findings(self) -> None:
+        # Only safe strtol/strtod variants — no ato* present.
+        assert cwe20.detect(cwe20_clean_session()) == []
+
+    def test_does_not_flag_absent_function(self) -> None:
+        # clean_baseline_session has none of the CWE-20 symbols.
+        assert cwe20.detect(clean_baseline_session()) == []
