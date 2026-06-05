@@ -43,14 +43,14 @@ This installs the `blight` console command and the `r2pipe` Python binding.
 ## Usage
 
 ```
-blight --binary PATH [--checks {22,78,89,119,120,122,131,134,197,242,250,252,295,327,362,369,401,415,416,426,476,676,732,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
+blight --binary PATH [--checks {20,22,78,89,119,120,122,131,134,191,197,242,250,252,295,327,330,362,369,377,401,415,416,426,476,502,676,732,798,all}] [--format {json,sarif,text}] [--output-file FILE] [--workers N] [--min-confidence {low,medium,high}] [--fail-on {none,low,medium,high}]
 ```
 
 - `--binary` — path to the ELF binary **or a directory of binaries** to analyze
   (required)
-- `--checks` — which CWE check to run; one of `22`, `78`, `89`, `119`, `120`,
+- `--checks` — which CWE check to run; one of `20`, `22`, `78`, `89`, `119`, `120`,
   `122`, `131`, `134`, `191`, `197`, `242`, `250`, `252`, `295`, `327`, `330`, `362`,
-  `369`, `401`, `415`, `416`, `426`, `476`, `676`, `732`, `798`, or `all`
+  `369`, `377`, `401`, `415`, `416`, `426`, `476`, `502`, `676`, `732`, `798`, or `all`
   (default: `all`)
 - `--format` — output format; `json` (default), `sarif`, or `text` (a
   human-readable console report, see **Human-readable text output** below)
@@ -139,7 +139,7 @@ is, not how severe the bug would be if exploited:
 | `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
 | `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-131 (an allocator's size argument traces back to a strlen-family return with no +1 adjustment in the in-function view but reachability of the allocation along that strlen path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-191 (a size argument is produced by an unguarded subtraction but whether the operands actually underflow at runtime is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
 | `high` | The dangerous symbol *is* the finding; no data-flow inference. | CWE-22 (HIGH-severity symbols), CWE-89 (HIGH-severity symbols), CWE-119 (HIGH-severity symbols), CWE-120, CWE-242, CWE-295 (HIGH-severity symbols), CWE-327 (HIGH-severity symbols), CWE-330 (parsed predictable seed — clock/pid return or small constant immediate), CWE-377 (HIGH-severity symbols — `tempnam`/`tmpnam_r`), CWE-426, CWE-502 (HIGH-severity symbols — Python marshal / PHP unserialize / default-tag yaml_load), CWE-676 (HIGH-severity symbols), CWE-732 (parsed constant world-writable mode), CWE-798 (password / key-material / URI-credential / secret-shaped values) |
-| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-377 (MEDIUM-severity symbols — `tmpfile`/`tmpfile64`), CWE-502 (MEDIUM-severity symbols — schema-less tree decoders cbor/msgpack/bson/protobuf-c/xdr), CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
+| `medium` | A heuristic fired (e.g. non-constant argument) that can miss aliased registers. | CWE-20 (all ato* symbols — PLT match is certain, attacker-controllability is a triage question), CWE-22 (MEDIUM-severity symbols), CWE-78, CWE-89 (MEDIUM-severity symbols), CWE-119 (MEDIUM-severity symbols), CWE-134, CWE-295 (MEDIUM-severity symbols), CWE-327 (MEDIUM-severity symbols), CWE-362, CWE-377 (MEDIUM-severity symbols — `tmpfile`/`tmpfile64`), CWE-502 (MEDIUM-severity symbols — schema-less tree decoders cbor/msgpack/bson/protobuf-c/xdr), CWE-676 (MEDIUM-severity symbols), CWE-798 (short token/key-class values that may be config knobs) |
 | `low` | The pattern is weakly indicative. | CWE-122 (a heap buffer reaches the destination of an unbounded copy but the reachability of that copy along the allocated path is not proven), CWE-401 (the last register alias of a heap allocation is overwritten unfreed but the reachability of that clobber along the allocated path is not proven), CWE-415 (the freed pointer reaches a second free but the reachability of that second free along the freed path is not proven), CWE-416 (the freed pointer is reused but the reachability of the use along the freed path is not proven), CWE-476 (path-reachability of the allocation failure is not proven), CWE-252 (path-reachability of the call failure is not proven), CWE-369 (the divisor is unchecked but its zero-reachability is not proven), CWE-191 (a size argument is produced by an unguarded subtraction but whether the operands actually underflow at runtime is not proven), CWE-197 (a known-wide return value is truncated into a narrower slot but whether the runtime value actually exceeds the narrow range is not proven), CWE-676 (LOW-severity symbols) |
 
 For CWE-676 the confidence mirrors the per-symbol severity surfaced in the
@@ -308,12 +308,50 @@ is reported as a clear CLI error and aborts the run before any scanning happens.
 
 `blight` detects well-defined classes that are reliably catchable via static
 disassembly + cross-reference analysis. The three CWE-78/120/242 classes shipped
-in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-131, CWE-134, CWE-191, CWE-197,
-CWE-252, CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-401, CWE-415, CWE-416,
-in v0.1; CWE-22, CWE-89, CWE-119, CWE-122, CWE-134, CWE-191, CWE-197, CWE-250,
-CWE-252, CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-377, CWE-401, CWE-415,
-CWE-416, CWE-426, CWE-476, CWE-502, CWE-676, CWE-732, and CWE-798 were added post-v0.1
-(see [POST_V01.md](POST_V01.md)).
+in v0.1; CWE-20, CWE-22, CWE-89, CWE-119, CWE-122, CWE-131, CWE-134, CWE-191, CWE-197,
+CWE-250, CWE-252, CWE-295, CWE-327, CWE-330, CWE-362, CWE-369, CWE-377, CWE-401,
+CWE-415, CWE-416, CWE-426, CWE-476, CWE-502, CWE-676, CWE-732, and CWE-798 were added
+post-v0.1 (see [POST_V01.md](POST_V01.md)).
+
+### CWE-20 — Improper Input Validation (unsafe ASCII-to-numeric conversion)
+
+Calls to `atoi`, `atol`, `atoll`, `atof`, and `atoq` — the classic C standard
+library functions that convert an ASCII string to a numeric type but provide
+**no error detection**. When the string is out of range or malformed, these
+functions silently return a clamped or undefined value without setting `errno`
+and without exposing any signal to the caller. A loop-counter, port number, or
+allocation size that comes from `atoi()` applied to attacker-controlled input
+can trigger integer overflows, out-of-bounds writes, or allocation underflows
+with no indication that parsing failed.
+
+The safe replacements — `strtol`/`strtoul`/`strtoll`/`strtoull` for integers
+and `strtod`/`strtof`/`strtold` for floats — all set `errno` on overflow and
+expose the first unconverted character (the `endptr`), allowing the caller to
+detect and reject invalid input. CWE-20 is ranked **#5** in the MITRE CWE Top
+25 Most Dangerous Software Weaknesses (2025 edition).
+
+This is a pure PLT-lookup check: any call site importing one of the `ato*`
+symbols is flagged with `medium` confidence (the symbol is certain; whether
+the argument is attacker-controlled is a triage question for the reviewer).
+Architecture-agnostic — works on every architecture radare2 can disassemble.
+
+```bash
+$ blight --binary path/to/elf --checks 20 --format json
+{
+  "binary": "path/to/elf",
+  "checks": [20],
+  "findings": [
+    {
+      "cwe": 20,
+      "function": "parse_port",
+      "address": "0x401160",
+      "evidence": "[MEDIUM] call to atoi: atoi() silently overflows on out-of-range input; use strtol() with errno",
+      "symbol": "atoi",
+      "confidence": "medium"
+    }
+  ]
+}
+```
 
 ### CWE-22 — Path Traversal
 

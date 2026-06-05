@@ -3979,3 +3979,72 @@ def cwe502_clean_session() -> FakeR2Session:
         Import(name="protobuf_c_message_unpack_to_buffer", plt=0x401070),
     ]
     return FakeR2Session(imports, xrefs={})
+
+
+# --- CWE-20 improper input validation (unsafe ato* parsers) -----------------
+
+
+def atoi_vuln_session() -> FakeR2Session:
+    """A single atoi() call — no overflow detection."""
+    imports = [Import(name="atoi", plt=0x401040)]
+    xrefs = {0x401040: [Xref(0x401160, "CALL", "parse_port", "call sym.imp.atoi")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def atol_vuln_session() -> FakeR2Session:
+    """A single atol() call — no overflow detection."""
+    imports = [Import(name="atol", plt=0x401050)]
+    xrefs = {0x401050: [Xref(0x401172, "CALL", "parse_size", "call sym.imp.atol")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def atoll_vuln_session() -> FakeR2Session:
+    """A single atoll() call — no overflow detection."""
+    imports = [Import(name="atoll", plt=0x401060)]
+    xrefs = {0x401060: [Xref(0x401184, "CALL", "parse_offset", "call sym.imp.atoll")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def atof_vuln_session() -> FakeR2Session:
+    """A single atof() call — silent HUGE_VAL on overflow."""
+    imports = [Import(name="atof", plt=0x401070)]
+    xrefs = {0x401070: [Xref(0x401196, "CALL", "parse_rate", "call sym.imp.atof")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def atoq_vuln_session() -> FakeR2Session:
+    """A single atoq() call (BSD alias for atoll) — no overflow detection."""
+    imports = [Import(name="atoq", plt=0x401080)]
+    xrefs = {0x401080: [Xref(0x4011a8, "CALL", "parse_quota", "call sym.imp.atoq")]}
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe20_all_session() -> FakeR2Session:
+    """All five CWE-20 unsafe parsers, each called once in a distinct function."""
+    imports = [
+        Import(name="atoi",  plt=0x401040),
+        Import(name="atol",  plt=0x401050),
+        Import(name="atoll", plt=0x401060),
+        Import(name="atof",  plt=0x401070),
+        Import(name="atoq",  plt=0x401080),
+        Import(name="strtol", plt=0x401090),  # safe — must not fire
+    ]
+    xrefs = {
+        0x401040: [Xref(0x401160, "CALL", "parse_port",   "call sym.imp.atoi")],
+        0x401050: [Xref(0x401172, "CALL", "parse_size",   "call sym.imp.atol")],
+        0x401060: [Xref(0x401184, "CALL", "parse_offset", "call sym.imp.atoll")],
+        0x401070: [Xref(0x401196, "CALL", "parse_rate",   "call sym.imp.atof")],
+        0x401080: [Xref(0x4011a8, "CALL", "parse_quota",  "call sym.imp.atoq")],
+    }
+    return FakeR2Session(imports, xrefs)
+
+
+def cwe20_clean_session() -> FakeR2Session:
+    """Only safe strtol/strtod replacements imported — no ato* present."""
+    imports = [
+        Import(name="strtol",  plt=0x401040),
+        Import(name="strtoll", plt=0x401050),
+        Import(name="strtod",  plt=0x401060),
+        Import(name="sscanf",  plt=0x401070),
+    ]
+    return FakeR2Session(imports, xrefs={})
