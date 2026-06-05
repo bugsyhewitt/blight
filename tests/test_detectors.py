@@ -222,6 +222,8 @@ from tests.fake_session import (
     strcpy_vuln_session,
     strtok_vuln_session,
     syslog_fmtstr_vuln_session,
+    popen_injection_constant_session,
+    popen_injection_vuln_session,
     system_constant_session,
     system_vuln_session,
     tmpnam_vuln_session,
@@ -1045,6 +1047,27 @@ class TestCwe78:
 
     def test_clean_baseline_no_findings(self) -> None:
         assert cwe78.detect(clean_baseline_session()) == []
+
+    def test_flags_nonconstant_popen(self) -> None:
+        """popen() with a non-constant command argument must be flagged (CWE-78)."""
+        findings = cwe78.detect(popen_injection_vuln_session())
+        popen_findings = [f for f in findings if f.symbol == "popen"]
+        assert len(popen_findings) == 1
+        f = popen_findings[0]
+        assert f.cwe == 78
+        assert f.function == "open_proc"
+        assert f.address == hex(0x4011B0)
+        assert "non-constant" in f.evidence
+        assert "popen" in f.evidence
+        assert f.confidence == "medium"
+
+    def test_does_not_flag_constant_popen(self) -> None:
+        """popen() with a constant command literal must NOT be flagged by CWE-78."""
+        assert cwe78.detect(popen_injection_constant_session()) == []
+
+    def test_popen_in_dangerous_set(self) -> None:
+        """popen must be in the CWE-78 DANGEROUS symbols set."""
+        assert "popen" in cwe78.DANGEROUS
 
 
 class TestCwe426:
