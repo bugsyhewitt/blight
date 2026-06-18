@@ -51,6 +51,11 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--version",
+        action="version",
+        version=f"blight {blight.__version__}",
+    )
+    parser.add_argument(
         "--binary",
         required=True,
         metavar="PATH",

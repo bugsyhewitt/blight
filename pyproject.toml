@@ -39,5 +39,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 markers = [
     "integration: tests that shell out to a real radare2 install (deselect with -m 'not integration')",
+    "ship_gate: v0.1 release ship-gate — build wheel, install into fresh venv, prove CLI works (deselect with -m 'not ship_gate')",
 ]
 testpaths = ["tests"]
