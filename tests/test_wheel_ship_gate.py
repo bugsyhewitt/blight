@@ -1,13 +1,14 @@
-"""blight v0.1 wheel ship-gate tests.
+"""blight v1.0 wheel ship-gate tests.
 
-Five tests that pin the release-artifact contract:
+Six tests that pin the release-artifact contract:
   1. python -m build produces a wheel + sdist.
   2. A fresh venv can install the wheel plus runtime deps.
-  3. blight --version from the fresh venv prints "blight 0.1.0".
-  4. import blight; assert blight.__version__ == "0.1.0" succeeds.
+  3. blight --version from the fresh venv prints "blight 1.0.0".
+  4. import blight; assert blight.__version__ == "1.0.0" succeeds.
   5. All 9 public top-level modules import cleanly.
+  6. CHANGELOG.md exists with a [1.0.0] entry.
 
-Run the full suite for the v0.1 release gate.
+Run the full suite for the v1.0 release gate.
 Skip these in the fast inner-loop: pytest -q -m "not ship_gate"
 """
 
@@ -92,7 +93,7 @@ def _setup_fresh_venv() -> tuple[Path, Path, Path]:
 
 @pytest.mark.ship_gate
 def test_build_wheel_and_sdist() -> None:
-    """python -m build produces both blight-0.1.0-py3-none-any.whl and blight-0.1.0.tar.gz."""
+    """python -m build produces both blight-1.0.0-py3-none-any.whl and blight-1.0.0.tar.gz."""
     dist_dir, wheel, _venv = _setup_fresh_venv()
 
     wheels = list(dist_dir.glob("blight-*.whl"))
@@ -100,8 +101,8 @@ def test_build_wheel_and_sdist() -> None:
 
     assert wheels, f"Wheel not found in {dist_dir}"
     assert sdists, f"Sdist not found in {dist_dir}"
-    assert "blight-0.1.0" in wheels[0].name, f"Unexpected wheel name: {wheels[0].name}"
-    assert "blight-0.1.0" in sdists[0].name, f"Unexpected sdist name: {sdists[0].name}"
+    assert "blight-1.0.0" in wheels[0].name, f"Unexpected wheel name: {wheels[0].name}"
+    assert "blight-1.0.0" in sdists[0].name, f"Unexpected sdist name: {sdists[0].name}"
 
 
 @pytest.mark.ship_gate
@@ -115,7 +116,7 @@ def test_fresh_venv_installs_wheel() -> None:
 
 @pytest.mark.ship_gate
 def test_cli_version_from_fresh_venv() -> None:
-    """blight --version from the fresh venv prints exactly 'blight 0.1.0'."""
+    """blight --version from the fresh venv prints exactly 'blight 1.0.0'."""
     _dist_dir, _wheel, venv_dir = _setup_fresh_venv()
     blight_bin = venv_dir / "bin" / "blight"
 
@@ -126,12 +127,12 @@ def test_cli_version_from_fresh_venv() -> None:
     )
     output = (result.stdout + result.stderr).strip()
     assert result.returncode == 0, f"blight --version exited {result.returncode}: {output}"
-    assert output == "blight 0.1.0", f"Unexpected --version output: {output!r}"
+    assert output == "blight 1.0.0", f"Unexpected --version output: {output!r}"
 
 
 @pytest.mark.ship_gate
 def test_import_and_version_from_fresh_venv() -> None:
-    """import blight; assert blight.__version__ == '0.1.0' succeeds in the fresh venv."""
+    """import blight; assert blight.__version__ == '1.0.0' succeeds in the fresh venv."""
     _dist_dir, _wheel, venv_dir = _setup_fresh_venv()
     python_bin = venv_dir / "bin" / "python"
 
@@ -139,7 +140,7 @@ def test_import_and_version_from_fresh_venv() -> None:
         [
             str(python_bin),
             "-c",
-            "import blight; assert blight.__version__ == '0.1.0', blight.__version__",
+            "import blight; assert blight.__version__ == '1.0.0', blight.__version__",
         ],
         capture_output=True,
         text=True,
@@ -171,3 +172,14 @@ def test_all_public_modules_import_from_fresh_venv() -> None:
         f"{result.stdout}{result.stderr}"
     )
     assert result.stdout.strip() == "ok", f"Unexpected stdout: {result.stdout!r}"
+
+
+@pytest.mark.ship_gate
+def test_changelog_exists_with_v1_0_0_entry() -> None:
+    """CHANGELOG.md exists at repo root and has a [1.0.0] entry."""
+    changelog = _project_root() / "CHANGELOG.md"
+    assert changelog.is_file(), f"CHANGELOG.md missing at {changelog}"
+    text = changelog.read_text(encoding="utf-8")
+    assert "## [1.0.0]" in text, (
+        f"CHANGELOG.md does not contain a [1.0.0] entry; first 200 chars: {text[:200]!r}"
+    )
