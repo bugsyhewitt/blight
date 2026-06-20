@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "blight"
-version = "0.1.0"
+version = "1.0.0"
 description = "Python-native CWE pattern detector for ELF binaries, driving radare2 via r2pipe — no Ghidra, no Java, no Docker, no Rust toolchain."
 readme = "README.md"
 requires-python = ">=3.13"
